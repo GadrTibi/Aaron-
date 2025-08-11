@@ -3,7 +3,7 @@ import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.pptx_fill import generate_estimation_pptx
-from app.services.poi import fetch_transports, suggest_places
+from app.services.poi import fetch_transports, suggest_places, list_metro_lines, list_bus_lines
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
 
@@ -86,6 +86,26 @@ def render(config):
         transport_metro = st.text_input("Transport - Métro", st.session_state.get("q_metro", "Métro …"), key="q_metro")
     with colQ3:
         transport_bus = st.text_input("Transport - Bus", st.session_state.get("q_bus", "Bus …"), key="q_bus")
+
+    if st.button("Renseigner lignes métro & bus (auto)"):
+        lat, lon = _geocode_main_address()
+        if lat is not None:
+            try:
+                metro = list_metro_lines(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
+                bus = list_bus_lines(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
+                st.session_state['metro_lines_auto'] = metro
+                st.session_state['bus_lines_auto'] = bus
+            except Exception as e:
+                st.warning(f"Lignes non chargées: {e}")
+        else:
+            st.session_state['metro_lines_auto'] = []
+            st.session_state['bus_lines_auto'] = []
+    metro_auto = st.session_state.get('metro_lines_auto', [])
+    bus_auto = st.session_state.get('bus_lines_auto', [])
+    metro_refs = ", ".join([f"Ligne {x.get('ref')}" for x in metro_auto if x.get('ref')])
+    bus_refs = ", ".join([f"Bus {x.get('ref')}" for x in bus_auto if x.get('ref')])
+    st.write(f"Métro : {metro_refs or '—'}")
+    st.write(f"Bus : {bus_refs or '—'}")
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
@@ -241,6 +261,10 @@ def render(config):
     PRIX_OPT = prix_nuitee * coef_opt
 
     # Mapping Estimation
+    metro = st.session_state.get('metro_lines_auto', [])
+    bus = st.session_state.get('bus_lines_auto', [])
+    metro_str = ", ".join([f"Ligne {x.get('ref')}" for x in metro if x.get('ref')])
+    bus_str = ", ".join([f"Bus {x.get('ref')}" for x in bus if x.get('ref')])
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
@@ -248,6 +272,8 @@ def render(config):
         "[[TRANSPORT_TAXI_TEXTE]]": st.session_state.get('q_tx', ''),
         "[[TRANSPORT_METRO_TEXTE]]": st.session_state.get('q_metro', ''),
         "[[TRANSPORT_BUS_TEXTE]]": st.session_state.get('q_bus', ''),
+        "[[TRANSPORT_METRO_LIGNES]]": metro_str,
+        "[[TRANSPORT_BUS_LIGNES]]": bus_str,
         "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
         "[[INCONTOURNABLE_2_NOM]]": st.session_state.get('i2', ''),
         "[[INCONTOURNABLE_3_NOM]]": st.session_state.get('i3', ''),

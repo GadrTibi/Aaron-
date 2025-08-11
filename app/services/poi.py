@@ -104,3 +104,77 @@ out center 200;
         "spots": [s[0] for s in spots[:2]],
         "visites": [v[0] for v in visites[:2]],
     }
+
+
+def list_metro_lines(lat: float, lon: float, radius_m: int = 1200, limit: int = 3) -> list[dict]:
+    q = f"""
+[out:json][timeout:25];
+(
+  node(around:{radius_m},{lat},{lon})[railway=subway_entrance];
+  node(around:{radius_m},{lat},{lon})[public_transport~"^(platform|stop_position)$"][subway=yes];
+)->.st;
+rel(bn.st)[type=route][route=subway];
+(._;>;);
+out body;
+"""
+    els = _overpass(q)
+    nodes = {el["id"]: (el.get("lat"), el.get("lon")) for el in els if el.get("type") == "node"}
+    lines = {}
+    for el in els:
+        if el.get("type") != "relation":
+            continue
+        tags = el.get("tags", {})
+        ref = tags.get("ref")
+        if not ref:
+            continue
+        name = tags.get("name") or f"M{ref}"
+        dist = None
+        for mem in el.get("members", []):
+            if mem.get("type") == "node" and mem.get("ref") in nodes:
+                lat2, lon2 = nodes[mem["ref"]]
+                d = _haversine(lat, lon, lat2, lon2)
+                if dist is None or d < dist:
+                    dist = d
+        if dist is None:
+            continue
+        cur = lines.get(ref)
+        if cur is None or dist < cur["distance_m"]:
+            lines[ref] = {"ref": ref, "name": name, "distance_m": int(dist)}
+    return sorted(lines.values(), key=lambda x: x["distance_m"])[:limit]
+
+
+def list_bus_lines(lat: float, lon: float, radius_m: int = 1200, limit: int = 3) -> list[dict]:
+    q = f"""
+[out:json][timeout:25];
+(
+  node(around:{radius_m},{lat},{lon})[highway=bus_stop];
+  node(around:{radius_m},{lat},{lon})[public_transport~"^(platform|stop_position)$"][bus=yes];
+)->.st;
+rel(bn.st)[type=route][route=bus];
+(._;>;);
+out body;
+"""
+    els = _overpass(q)
+    nodes = {el["id"]: (el.get("lat"), el.get("lon")) for el in els if el.get("type") == "node"}
+    lines = {}
+    for el in els:
+        if el.get("type") != "relation":
+            continue
+        tags = el.get("tags", {})
+        ref = tags.get("ref")
+        if not ref:
+            continue
+        name = tags.get("name") or f"Bus {ref}"
+        dist = None
+        for mem in el.get("members", []):
+            if mem.get("type") == "node" and mem.get("ref") in nodes:
+                lat2, lon2 = nodes[mem["ref"]]
+                d = _haversine(lat, lon, lat2, lon2)
+                if dist is None or d < dist:
+                    dist = d
+        if dist is None:
+            continue
+        cur = lines.get(ref)
+        if cur is None or dist < cur["distance_m"]:
+            lines[ref] = {"ref": ref, "name": name, "distance_m": int(dist)}
+    return sorted(lines.values(), key=lambda x: x["distance_m"])[:limit]
