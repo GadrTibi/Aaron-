@@ -165,35 +165,65 @@ def render(config):
     new_v2 = sel_vis[1] if len(sel_vis) > 1 else ""
     if new_v1 != prev_v1:
         st.session_state['visite1_imgs'] = []
-        st.session_state['visite1_choice'] = None
+        st.session_state.pop('v1_img_choice', None)
     if new_v2 != prev_v2:
         st.session_state['visite2_imgs'] = []
-        st.session_state['visite2_choice'] = None
+        st.session_state.pop('v2_img_choice', None)
     st.session_state['v1'] = new_v1
     st.session_state['v2'] = new_v2
 
     if "visite1_imgs" not in st.session_state: st.session_state.visite1_imgs = []
     if "visite2_imgs" not in st.session_state: st.session_state.visite2_imgs = []
-    if "visite1_choice" not in st.session_state: st.session_state.visite1_choice = None
-    if "visite2_choice" not in st.session_state: st.session_state.visite2_choice = None
+
+    address = st.session_state.get("bien_addr", "")
 
     cimg1, cimg2 = st.columns(2)
     with cimg1:
         if st.button("Chercher images pour Visite 1"):
-            st.session_state.visite1_imgs = find_place_image_urls(st.session_state.get("v1","") or "", lang="fr", limit=6)
+            st.session_state.visite1_imgs = find_place_image_urls(
+                st.session_state.get("v1", "") or "",
+                city=address,
+                lang="fr",
+                limit=6,
+            )
+            if not st.session_state.visite1_imgs:
+                st.info("Aucune image trouvée")
         if st.session_state.visite1_imgs:
             st.write("Choisir une image pour Visite 1 :")
-            for idx, url in enumerate(st.session_state.visite1_imgs):
-                st.image(url, caption=f"Option {idx+1}", use_column_width=True)
-            st.session_state.visite1_choice = st.number_input("Choix image Visite 1 (numéro)", min_value=1, max_value=len(st.session_state.visite1_imgs), value=1, step=1, key="v1_choice")
+            imgs = st.session_state.visite1_imgs
+            for i in range(0, len(imgs), 3):
+                row = imgs[i:i+3]
+                cols = st.columns(3)
+                for url, col in zip(row, cols):
+                    col.image(url, width=200)
+            st.radio(
+                "Sélection", list(range(len(imgs))),
+                format_func=lambda i: f"Image {i+1}",
+                key="v1_img_choice",
+            )
     with cimg2:
         if st.button("Chercher images pour Visite 2"):
-            st.session_state.visite2_imgs = find_place_image_urls(st.session_state.get("v2","") or "", lang="fr", limit=6)
+            st.session_state.visite2_imgs = find_place_image_urls(
+                st.session_state.get("v2", "") or "",
+                city=address,
+                lang="fr",
+                limit=6,
+            )
+            if not st.session_state.visite2_imgs:
+                st.info("Aucune image trouvée")
         if st.session_state.visite2_imgs:
             st.write("Choisir une image pour Visite 2 :")
-            for idx, url in enumerate(st.session_state.visite2_imgs):
-                st.image(url, caption=f"Option {idx+1}", use_column_width=True)
-            st.session_state.visite2_choice = st.number_input("Choix image Visite 2 (numéro)", min_value=1, max_value=len(st.session_state.visite2_imgs), value=1, step=1, key="v2_choice")
+            imgs = st.session_state.visite2_imgs
+            for i in range(0, len(imgs), 3):
+                row = imgs[i:i+3]
+                cols = st.columns(3)
+                for url, col in zip(row, cols):
+                    col.image(url, width=200)
+            st.radio(
+                "Sélection", list(range(len(imgs))),
+                format_func=lambda i: f"Image {i+1}",
+                key="v2_img_choice",
+            )
     st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
 
     # Points forts & Challenges (Slide 5)
@@ -317,18 +347,20 @@ def render(config):
         except Exception:
             return None
 
-    if st.session_state.get('visite1_imgs') and st.session_state.get('visite1_choice'):
-        idx = int(st.session_state['visite1_choice']) - 1
+    if st.session_state.get('visite1_imgs') and st.session_state.get('v1_img_choice') is not None:
+        idx = st.session_state['v1_img_choice']
         arr = st.session_state['visite1_imgs']
         if 0 <= idx < len(arr):
             p = _download(arr[idx])
-            if p: image_by_shape["VISITE_1_IMG"] = p
-    if st.session_state.get('visite2_imgs') and st.session_state.get('visite2_choice'):
-        idx = int(st.session_state['visite2_choice']) - 1
+            if p:
+                image_by_shape["VISITE_1_IMG"] = p
+    if st.session_state.get('visite2_imgs') and st.session_state.get('v2_img_choice') is not None:
+        idx = st.session_state['v2_img_choice']
         arr = st.session_state['visite2_imgs']
         if 0 <= idx < len(arr):
             p = _download(arr[idx])
-            if p: image_by_shape["VISITE_2_IMG"] = p
+            if p:
+                image_by_shape["VISITE_2_IMG"] = p
 
     # ---- Generate Estimation ----
     st.subheader("Générer l'Estimation (PPTX)")
