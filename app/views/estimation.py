@@ -3,7 +3,14 @@ import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.pptx_fill import generate_estimation_pptx
-from app.services.poi import fetch_transports, suggest_places, list_metro_lines, list_bus_lines
+from app.services.poi import (
+    fetch_transports,
+    list_incontournables,
+    list_spots,
+    list_visites,
+    list_metro_lines,
+    list_bus_lines,
+)
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
 
@@ -94,66 +101,76 @@ def render(config):
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
-    if st.button("Proposer Incontournables"):
+    if st.button("Charger Incontournables (≈15)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                sug = suggest_places(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
-                inc = sug.get("incontournables", [])
-                st.session_state["__prefill"] = {
-                    "i1": inc[0] if len(inc) > 0 else "",
-                    "i2": inc[1] if len(inc) > 1 else "",
-                    "i3": inc[2] if len(inc) > 2 else "",
-                }
-                st.rerun()
+                st.session_state['incontournables_list'] = list_incontournables(
+                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
+                )
             except Exception as e:
-                st.warning(f"Suggestions non chargées: {e}")
-    colI1, colI2, colI3 = st.columns(3)
-    with colI1:
-        incontournable_1 = st.text_input("Incontournable 1 (nom)", st.session_state.get("i1", ""), key="i1")
-    with colI2:
-        incontournable_2 = st.text_input("Incontournable 2 (nom)", st.session_state.get("i2", ""), key="i2")
-    with colI3:
-        incontournable_3 = st.text_input("Incontournable 3 (nom)", st.session_state.get("i3", ""), key="i3")
+                st.warning(f"Incontournables non chargés: {e}")
+    inco_list = st.session_state.get('incontournables_list', [])
+    default_inco = [x for x in [st.session_state.get('i1'), st.session_state.get('i2'), st.session_state.get('i3')] if x]
+    sel_inco = st.multiselect(
+        "Incontournables (max 3)",
+        options=inco_list,
+        default=default_inco or inco_list[:3]
+    )
+    sel_inco = sel_inco[:3]
+    st.session_state['i1'] = sel_inco[0] if len(sel_inco) > 0 else ""
+    st.session_state['i2'] = sel_inco[1] if len(sel_inco) > 1 else ""
+    st.session_state['i3'] = sel_inco[2] if len(sel_inco) > 2 else ""
 
-    if st.button("Proposer Spots"):
+    if st.button("Charger Spots (≈10)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                sug = suggest_places(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
-                sp = sug.get("spots", [])
-                st.session_state["__prefill"] = {
-                    "s1": sp[0] if len(sp) > 0 else "",
-                    "s2": sp[1] if len(sp) > 1 else "",
-                }
-                st.rerun()
+                st.session_state['spots_list'] = list_spots(
+                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
+                )
             except Exception as e:
-                st.warning(f"Suggestions non chargées: {e}")
-    colS1, colS2 = st.columns(2)
-    with colS1:
-        spot_1 = st.text_input("Spot à faire 1 (nom)", st.session_state.get("s1", ""), key="s1")
-    with colS2:
-        spot_2 = st.text_input("Spot à faire 2 (nom)", st.session_state.get("s2", ""), key="s2")
+                st.warning(f"Spots non chargés: {e}")
+    spots_list = st.session_state.get('spots_list', [])
+    default_spots = [x for x in [st.session_state.get('s1'), st.session_state.get('s2')] if x]
+    sel_spots = st.multiselect(
+        "Spots (max 2)",
+        options=spots_list,
+        default=default_spots or spots_list[:2]
+    )
+    sel_spots = sel_spots[:2]
+    st.session_state['s1'] = sel_spots[0] if len(sel_spots) > 0 else ""
+    st.session_state['s2'] = sel_spots[1] if len(sel_spots) > 1 else ""
 
     st.markdown("**Lieux à visiter (2) — images auto (Wikipedia/Commons)**")
-    if st.button("Proposer Lieux à visiter"):
+    if st.button("Charger Visites (≈10)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                sug = suggest_places(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
-                vs = sug.get("visites", [])
-                st.session_state["__prefill"] = {
-                    "v1": vs[0] if len(vs) > 0 else "",
-                    "v2": vs[1] if len(vs) > 1 else "",
-                }
-                st.rerun()
+                st.session_state['visites_list'] = list_visites(
+                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
+                )
             except Exception as e:
-                st.warning(f"Suggestions non chargées: {e}")
-    colV1, colV2 = st.columns(2)
-    with colV1:
-        visite_1 = st.text_input("Lieu à visiter 1 (nom)", st.session_state.get("v1", ""), key="v1")
-    with colV2:
-        visite_2 = st.text_input("Lieu à visiter 2 (nom)", st.session_state.get("v2", ""), key="v2")
+                st.warning(f"Visites non chargées: {e}")
+    vis_list = st.session_state.get('visites_list', [])
+    default_vis = [x for x in [st.session_state.get('v1'), st.session_state.get('v2')] if x]
+    sel_vis = st.multiselect(
+        "Lieux à visiter (max 2)",
+        options=vis_list,
+        default=default_vis or vis_list[:2]
+    )
+    sel_vis = sel_vis[:2]
+    prev_v1, prev_v2 = st.session_state.get('v1', ''), st.session_state.get('v2', '')
+    new_v1 = sel_vis[0] if len(sel_vis) > 0 else ""
+    new_v2 = sel_vis[1] if len(sel_vis) > 1 else ""
+    if new_v1 != prev_v1:
+        st.session_state['visite1_imgs'] = []
+        st.session_state['visite1_choice'] = None
+    if new_v2 != prev_v2:
+        st.session_state['visite2_imgs'] = []
+        st.session_state['visite2_choice'] = None
+    st.session_state['v1'] = new_v1
+    st.session_state['v2'] = new_v2
 
     if "visite1_imgs" not in st.session_state: st.session_state.visite1_imgs = []
     if "visite2_imgs" not in st.session_state: st.session_state.visite2_imgs = []
