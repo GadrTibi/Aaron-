@@ -52,9 +52,33 @@ def render(config):
             return legacy_est
         return os.path.join(EST_TPL_DIR, label)
 
+    def _geocode_main_address():
+        addr = st.session_state.get("bien_addr", "")
+        if not addr:
+            st.warning("Adresse introuvable…")
+            return None, None
+        with st.spinner("Recherche d'adresse…"):
+            lat, lon = geocode_address(addr)
+        if lat is None:
+            st.warning("Adresse introuvable…")
+        return lat, lon
+
     # ---- Quartier & transports (Slide 4) ----
     st.subheader("Quartier (Slide 4)")
     quartier_texte = st.text_area("Texte d'intro du quartier (paragraphe)", st.session_state.get("q_txt", "Texte libre saisi par l'utilisateur."), key="q_txt")
+    if st.button("Remplir Transports"):
+        lat, lon = _geocode_main_address()
+        if lat is not None:
+            try:
+                tr = fetch_transports(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
+                st.session_state["__prefill"] = {
+                    "q_tx": tr.get("taxi", ""),
+                    "q_metro": tr.get("metro", ""),
+                    "q_bus": tr.get("bus", ""),
+                }
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Transports non chargés: {e}")
     colQ1, colQ2, colQ3 = st.columns(3)
     with colQ1:
         transport_taxi = st.text_input("Transport - Taxi", st.session_state.get("q_tx", "Station de taxi (…)"), key="q_tx")
@@ -65,6 +89,20 @@ def render(config):
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
+    if st.button("Proposer Incontournables"):
+        lat, lon = _geocode_main_address()
+        if lat is not None:
+            try:
+                sug = suggest_places(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
+                inc = sug.get("incontournables", [])
+                st.session_state["__prefill"] = {
+                    "i1": inc[0] if len(inc) > 0 else "",
+                    "i2": inc[1] if len(inc) > 1 else "",
+                    "i3": inc[2] if len(inc) > 2 else "",
+                }
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Suggestions non chargées: {e}")
     colI1, colI2, colI3 = st.columns(3)
     with colI1:
         incontournable_1 = st.text_input("Incontournable 1 (nom)", st.session_state.get("i1", ""), key="i1")
@@ -73,6 +111,19 @@ def render(config):
     with colI3:
         incontournable_3 = st.text_input("Incontournable 3 (nom)", st.session_state.get("i3", ""), key="i3")
 
+    if st.button("Proposer Spots"):
+        lat, lon = _geocode_main_address()
+        if lat is not None:
+            try:
+                sug = suggest_places(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
+                sp = sug.get("spots", [])
+                st.session_state["__prefill"] = {
+                    "s1": sp[0] if len(sp) > 0 else "",
+                    "s2": sp[1] if len(sp) > 1 else "",
+                }
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Suggestions non chargées: {e}")
     colS1, colS2 = st.columns(2)
     with colS1:
         spot_1 = st.text_input("Spot à faire 1 (nom)", st.session_state.get("s1", ""), key="s1")
@@ -80,6 +131,19 @@ def render(config):
         spot_2 = st.text_input("Spot à faire 2 (nom)", st.session_state.get("s2", ""), key="s2")
 
     st.markdown("**Lieux à visiter (2) — images auto (Wikipedia/Commons)**")
+    if st.button("Proposer Lieux à visiter"):
+        lat, lon = _geocode_main_address()
+        if lat is not None:
+            try:
+                sug = suggest_places(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
+                vs = sug.get("visites", [])
+                st.session_state["__prefill"] = {
+                    "v1": vs[0] if len(vs) > 0 else "",
+                    "v2": vs[1] if len(vs) > 1 else "",
+                }
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Suggestions non chargées: {e}")
     colV1, colV2 = st.columns(2)
     with colV1:
         visite_1 = st.text_input("Lieu à visiter 1 (nom)", st.session_state.get("v1", ""), key="v1")
@@ -108,65 +172,7 @@ def render(config):
             for idx, url in enumerate(st.session_state.visite2_imgs):
                 st.image(url, caption=f"Option {idx+1}", use_column_width=True)
             st.session_state.visite2_choice = st.number_input("Choix image Visite 2 (numéro)", min_value=1, max_value=len(st.session_state.visite2_imgs), value=1, step=1, key="v2_choice")
-    radius_m = st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
-
-    def _geocode_main_address():
-        addr = st.session_state.get("bien_addr", "")
-        if not addr:
-            st.warning("Adresse introuvable…")
-            return None, None
-        with st.spinner("Recherche d'adresse…"):
-            lat, lon = geocode_address(addr)
-        if lat is None:
-            st.warning("Adresse introuvable…")
-        return lat, lon
-
-    b1, b2, b3, b4 = st.columns(4)
-    with b1:
-        if st.button("Remplir Transports"):
-            lat, lon = _geocode_main_address()
-            if lat is not None:
-                try:
-                    tr = fetch_transports(lat, lon, radius_m=radius_m)
-                    st.session_state["q_tx"] = tr.get("taxi", "")
-                    st.session_state["q_metro"] = tr.get("metro", "")
-                    st.session_state["q_bus"] = tr.get("bus", "")
-                except Exception as e:
-                    st.warning(f"Transports non chargés: {e}")
-    with b2:
-        if st.button("Proposer Incontournables"):
-            lat, lon = _geocode_main_address()
-            if lat is not None:
-                try:
-                    sug = suggest_places(lat, lon, radius_m=radius_m)
-                    inc = sug.get("incontournables", [])
-                    st.session_state["i1"] = inc[0] if len(inc) > 0 else ""
-                    st.session_state["i2"] = inc[1] if len(inc) > 1 else ""
-                    st.session_state["i3"] = inc[2] if len(inc) > 2 else ""
-                except Exception as e:
-                    st.warning(f"Suggestions non chargées: {e}")
-    with b3:
-        if st.button("Proposer Spots"):
-            lat, lon = _geocode_main_address()
-            if lat is not None:
-                try:
-                    sug = suggest_places(lat, lon, radius_m=radius_m)
-                    sp = sug.get("spots", [])
-                    st.session_state["s1"] = sp[0] if len(sp) > 0 else ""
-                    st.session_state["s2"] = sp[1] if len(sp) > 1 else ""
-                except Exception as e:
-                    st.warning(f"Suggestions non chargées: {e}")
-    with b4:
-        if st.button("Proposer Lieux à visiter"):
-            lat, lon = _geocode_main_address()
-            if lat is not None:
-                try:
-                    sug = suggest_places(lat, lon, radius_m=radius_m)
-                    vs = sug.get("visites", [])
-                    st.session_state["v1"] = vs[0] if len(vs) > 0 else ""
-                    st.session_state["v2"] = vs[1] if len(vs) > 1 else ""
-                except Exception as e:
-                    st.warning(f"Suggestions non chargées: {e}")
+    st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
 
     # Points forts & Challenges (Slide 5)
     st.subheader("Points forts & Challenges (Slide 5)")
