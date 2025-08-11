@@ -2,14 +2,20 @@
 import os
 import sys
 
-import streamlit as st
-
-from app.pages import estimation, mandat, book
-
-# Ensure package path
+# Ensure the repository root (containing the ``app`` package) is on
+# ``sys.path`` **before** importing internal modules. When the script is
+# executed directly (``python app/main.py``), only the ``app`` directory is
+# added to ``sys.path`` by Python.  Importing using ``from app...`` then fails
+# because the parent directory isn't visible.  Adding the base directory here
+# makes the package importable in both direct execution and ``python -m``
+# contexts.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
+
+import streamlit as st
+
+from app.pages import estimation, mandat, book
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(APP_ROOT, "templates")
