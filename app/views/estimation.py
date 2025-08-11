@@ -1,9 +1,9 @@
-import os, re, tempfile, requests
+import os, tempfile, requests
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.pptx_fill import generate_estimation_pptx
-from app.services.poi import fetch_pois, fetch_transports, suggest_places
+from app.services.poi import fetch_transports, suggest_places
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
 
@@ -108,6 +108,65 @@ def render(config):
             for idx, url in enumerate(st.session_state.visite2_imgs):
                 st.image(url, caption=f"Option {idx+1}", use_column_width=True)
             st.session_state.visite2_choice = st.number_input("Choix image Visite 2 (numéro)", min_value=1, max_value=len(st.session_state.visite2_imgs), value=1, step=1, key="v2_choice")
+    radius_m = st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
+
+    def _geocode_main_address():
+        addr = st.session_state.get("bien_addr", "")
+        if not addr:
+            st.warning("Adresse introuvable…")
+            return None, None
+        with st.spinner("Recherche d'adresse…"):
+            lat, lon = geocode_address(addr)
+        if lat is None:
+            st.warning("Adresse introuvable…")
+        return lat, lon
+
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        if st.button("Remplir Transports"):
+            lat, lon = _geocode_main_address()
+            if lat is not None:
+                try:
+                    tr = fetch_transports(lat, lon, radius_m=radius_m)
+                    st.session_state["q_tx"] = tr.get("taxi", "")
+                    st.session_state["q_metro"] = tr.get("metro", "")
+                    st.session_state["q_bus"] = tr.get("bus", "")
+                except Exception as e:
+                    st.warning(f"Transports non chargés: {e}")
+    with b2:
+        if st.button("Proposer Incontournables"):
+            lat, lon = _geocode_main_address()
+            if lat is not None:
+                try:
+                    sug = suggest_places(lat, lon, radius_m=radius_m)
+                    inc = sug.get("incontournables", [])
+                    st.session_state["i1"] = inc[0] if len(inc) > 0 else ""
+                    st.session_state["i2"] = inc[1] if len(inc) > 1 else ""
+                    st.session_state["i3"] = inc[2] if len(inc) > 2 else ""
+                except Exception as e:
+                    st.warning(f"Suggestions non chargées: {e}")
+    with b3:
+        if st.button("Proposer Spots"):
+            lat, lon = _geocode_main_address()
+            if lat is not None:
+                try:
+                    sug = suggest_places(lat, lon, radius_m=radius_m)
+                    sp = sug.get("spots", [])
+                    st.session_state["s1"] = sp[0] if len(sp) > 0 else ""
+                    st.session_state["s2"] = sp[1] if len(sp) > 1 else ""
+                except Exception as e:
+                    st.warning(f"Suggestions non chargées: {e}")
+    with b4:
+        if st.button("Proposer Lieux à visiter"):
+            lat, lon = _geocode_main_address()
+            if lat is not None:
+                try:
+                    sug = suggest_places(lat, lon, radius_m=radius_m)
+                    vs = sug.get("visites", [])
+                    st.session_state["v1"] = vs[0] if len(vs) > 0 else ""
+                    st.session_state["v2"] = vs[1] if len(vs) > 1 else ""
+                except Exception as e:
+                    st.warning(f"Suggestions non chargées: {e}")
 
     # Points forts & Challenges (Slide 5)
     st.subheader("Points forts & Challenges (Slide 5)")
@@ -118,119 +177,6 @@ def render(config):
     with colCH:
         challenge_1 = st.text_input("Challenge 1", st.session_state.get("ch1", "Pas d’ascenseur"), key="ch1")
         challenge_2 = st.text_input("Challenge 2", st.session_state.get("ch2", "Bruit de la rue en journée"), key="ch2")
-
-    # ---- POI via adresse ----
-    st.subheader("Points d'intérêt (POI)")
-    addr_for_geo = st.text_input("Adresse pour géocoder (texte ou lat,lon)", value=st.session_state.get("poi_addr", st.session_state.get("bien_addr","")), key="poi_addr")
-    radius_m = st.slider("Rayon POI (m)", min_value=300, max_value=3000, value=st.session_state.get("poi_r", 1200), step=100, key="poi_r")
-    auto_after_geocode = st.toggle("Remplir automatiquement Transports + Suggestions après géocodage", value=st.session_state.get("auto_after_geocode", True), key="auto_after_geocode", help="Si activé, dès que l'adresse est géocodée on remplit les champs pertinents.")
-
-    lat, lon = None, None
-    LATLON_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
-    m = LATLON_RE.match(addr_for_geo or "")
-    if m:
-        lat, lon = float(m.group(1)), float(m.group(2))
-        st.session_state['geo_lat'] = lat; st.session_state['geo_lon'] = lon
-    else:
-        if st.button("Géocoder l'adresse"):
-            with st.spinner("Recherche d'adresse…"):
-                glat, glon = geocode_address(addr_for_geo)
-            if glat is None:
-                st.error("Adresse introuvable. Vérifie l'orthographe ou ajoute la ville/pays.")
-            else:
-                st.session_state['geo_lat'] = glat
-                st.session_state['geo_lon'] = glon
-                lat, lon = glat, glon
-                st.success(f"Adresse localisée: {lat:.6f}, {lon:.6f}")
-                if st.session_state.get("auto_after_geocode", True):
-                    prefill = {}
-                    try:
-                        tr = fetch_transports(lat, lon, radius_m=radius_m)
-                        if tr.get('taxi'): prefill['q_tx'] = tr['taxi']
-                        if tr.get('metro'): prefill['q_metro'] = tr['metro']
-                        if tr.get('bus'): prefill['q_bus'] = tr['bus']
-                    except Exception as e:
-                        st.info(f"Transports non chargés: {e}")
-                    try:
-                        sug = suggest_places(lat, lon, radius_m=radius_m)
-                        inc = sug.get('incontournables', [])
-                        sp = sug.get('spots', [])
-                        vs = sug.get('visites', [])
-                        if len(inc) > 0: prefill['i1'] = inc[0]
-                        if len(inc) > 1: prefill['i2'] = inc[1]
-                        if len(inc) > 2: prefill['i3'] = inc[2]
-                        if len(sp) > 0: prefill['s1'] = sp[0]
-                        if len(sp) > 1: prefill['s2'] = sp[1]
-                        if len(vs) > 0: prefill['v1'] = vs[0]
-                        if len(vs) > 1: prefill['v2'] = vs[1]
-                    except Exception as e:
-                        st.info(f"Suggestions non chargées: {e}")
-                    if prefill:
-                        st.session_state["__prefill"] = prefill
-                        st.rerun()
-
-    if 'geo_lat' in st.session_state and 'geo_lon' in st.session_state and (lat is None or lon is None):
-        lat = st.session_state['geo_lat']; lon = st.session_state['geo_lon']
-
-    if "pois" not in st.session_state: st.session_state["pois"] = []
-    if st.button("Chercher les POI (OSM)"):
-        if lat is None or lon is None:
-            st.warning("Géocode d'abord l'adresse ou saisis lat,lon.")
-        else:
-            try:
-                st.session_state["pois"] = fetch_pois(lat, lon, radius_m=radius_m)
-            except Exception as e:
-                st.warning(f"POI: {e}")
-
-    selected_poi_names = []
-    pois = st.session_state.get("pois", [])
-    if pois:
-        st.write("Sélectionnez jusqu'à 3 POI pertinents :")
-        poi_names = [f"{p['name']} ({p['category']})" for p in pois]
-        picked = st.multiselect("POI", poi_names, default=poi_names[:3] if poi_names else [])
-        selected_poi_names = picked[:3]
-
-    st.markdown('---')
-    colAuto1, colAuto2 = st.columns(2)
-    with colAuto1:
-        if st.button('Auto-remplir Transports depuis l\'adresse'):
-            if ('geo_lat' in st.session_state) and ('geo_lon' in st.session_state):
-                try:
-                    tr = fetch_transports(st.session_state['geo_lat'], st.session_state['geo_lon'], radius_m=radius_m)
-                    prefill = {}
-                    if tr.get('taxi'): prefill['q_tx'] = tr['taxi']
-                    if tr.get('metro'): prefill['q_metro'] = tr['metro']
-                    if tr.get('bus'): prefill['q_bus'] = tr['bus']
-                    if prefill:
-                        st.session_state["__prefill"] = prefill
-                        st.rerun()
-                except Exception as e:
-                    st.info(f"Transports non chargés: {e}")
-            else:
-                st.warning('Géocode d\'abord l\'adresse.')
-    with colAuto2:
-        if st.button('Suggérer Incontournables/Spots/Visites'):
-            if ('geo_lat' in st.session_state) and ('geo_lon' in st.session_state):
-                try:
-                    sug = suggest_places(st.session_state['geo_lat'], st.session_state['geo_lon'], radius_m=radius_m)
-                    inc = sug.get('incontournables', [])
-                    sp = sug.get('spots', [])
-                    vs = sug.get('visites', [])
-                    prefill = {}
-                    if len(inc) > 0: prefill['i1'] = inc[0]
-                    if len(inc) > 1: prefill['i2'] = inc[1]
-                    if len(inc) > 2: prefill['i3'] = inc[2]
-                    if len(sp) > 0: prefill['s1'] = sp[0]
-                    if len(sp) > 1: prefill['s2'] = sp[1]
-                    if len(vs) > 0: prefill['v1'] = vs[0]
-                    if len(vs) > 1: prefill['v2'] = vs[1]
-                    if prefill:
-                        st.session_state["__prefill"] = prefill
-                        st.rerun()
-                except Exception as e:
-                    st.info(f"Suggestions non chargées: {e}")
-            else:
-                st.warning('Géocode d\'abord l\'adresse.')
 
     # ---- Revenus + scénarios ----
     st.subheader("Paramètres revenus")
