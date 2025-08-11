@@ -1,0 +1,7 @@
+streamlit
+python-pptx
+python-docx
+requests
+reportlab
+Pillow
+matplotlib

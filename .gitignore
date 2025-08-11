@@ -1,0 +1,46 @@
+# Environnements Python
+.venv/
+env/
+venv/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs et fichiers temporaires
+*.log
+*.tmp
+*.temp
+
+# Cache
+.cache/
+*.DS_Store
+
+# Sorties Streamlit
+.streamlit/
+
+# Données de sortie / générées
+output/
+*.pdf
+*.pptx
+*.docx
+*.xlsx
+
+# Templates (non versionnés)
+app/templates/estimation/
+app/templates/mandat/
+app/templates/book/
+
+# Images téléchargées
+app/static/images/
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.svg
+
+# Config locale
+*.env
+.env.*
