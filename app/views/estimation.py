@@ -275,35 +275,23 @@ def render(config):
     colY.metric("Frais généraux", f"{FRAIS_GEN:.0f} €")
     colZ.metric("Revenu net", f"{REV_NET:.0f} €")
 
-    # Graphe
-    try:
-        import matplotlib.pyplot as plt
-        fig = plt.figure()
-        plt.bar(["Brut","Frais","Net"], [REV_BRUT, FRAIS_GEN, REV_NET])
-        st.pyplot(fig)
-        chart_path = os.path.join(OUT_DIR, "revenus_chart.png")
-        fig.savefig(chart_path, bbox_inches="tight")
-    except Exception:
-        chart_path = None
-        st.info("Chart non généré (matplotlib manquant)")
-
     # Scénarios prix
     PRIX_PESS = prix_nuitee * coef_pess
     PRIX_CIBLE = prix_nuitee * coef_cible
     PRIX_OPT = prix_nuitee * coef_opt
 
     # Mapping Estimation
-    metro = st.session_state.get('metro_lines_auto', [])
-    bus = st.session_state.get('bus_lines_auto', [])
-    metro_str = ", ".join([f"Ligne {x.get('ref')}" for x in metro if x.get('ref')])
-    bus_str = ", ".join([f"Bus {x.get('ref')}" for x in bus if x.get('ref')])
+    metro = st.session_state.get('metro_lines_auto') or []
+    bus = st.session_state.get('bus_lines_auto') or []
+    metro_str = ", ".join(f"Ligne {x.get('ref')}" for x in metro if x.get('ref'))
+    bus_str = ", ".join(f"Bus {x.get('ref')}" for x in bus if x.get('ref'))
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
         "[[QUARTIER_TEXTE]]": st.session_state.get("q_txt",""),
         "[[TRANSPORT_TAXI_TEXTE]]": st.session_state.get('q_tx', ''),
-        "[[TRANSPORT_METRO_LIGNES]]": metro_str,
-        "[[TRANSPORT_BUS_LIGNES]]": bus_str,
+        "[[TRANSPORT_METRO_TEXTE]]": metro_str,
+        "[[TRANSPORT_BUS_TEXTE]]": bus_str,
         "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
         "[[INCONTOURNABLE_2_NOM]]": st.session_state.get('i2', ''),
         "[[INCONTOURNABLE_3_NOM]]": st.session_state.get('i3', ''),
@@ -370,7 +358,7 @@ def render(config):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        generate_estimation_pptx(est_tpl_path, pptx_out, mapping, chart_image=chart_path, image_by_shape=image_by_shape or None)
+        generate_estimation_pptx(est_tpl_path, pptx_out, mapping, image_by_shape=image_by_shape or None)
         st.success(f"OK: {pptx_out}")
         with open(pptx_out, "rb") as f:
             st.download_button("Télécharger le PPTX", data=f.read(), file_name=os.path.basename(pptx_out))
