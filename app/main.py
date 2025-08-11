@@ -15,7 +15,7 @@ if BASE_DIR not in sys.path:
 
 import streamlit as st
 
-from app.pages import estimation, mandat, book
+from app.views import estimation, mandat, book
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 TPL_DIR = os.path.join(APP_ROOT, "templates")
