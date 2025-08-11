@@ -106,6 +106,37 @@ out center 200;
     }
 
 
+def _list_generic(lat: float, lon: float, radius_m: int, tag_expr: str, limit: int) -> list[str]:
+    q = f"""
+[out:json][timeout:25];
+node(around:{radius_m},{lat},{lon})[{tag_expr}];
+out center;
+"""
+    els = _overpass(q)
+    cand = {}
+    for el in els:
+        name = el.get("tags", {}).get("name")
+        if not name:
+            continue
+        d = _haversine(lat, lon, el.get("lat"), el.get("lon"))
+        cur = cand.get(name)
+        if cur is None or d < cur:
+            cand[name] = d
+    return [name for name, _ in sorted(cand.items(), key=lambda x: x[1])][:limit]
+
+
+def list_incontournables(lat: float, lon: float, radius_m: int = 1200, limit: int = 15) -> list[str]:
+    return _list_generic(lat, lon, radius_m, 'amenity~"^(restaurant|cafe|bakery)$"', limit)
+
+
+def list_spots(lat: float, lon: float, radius_m: int = 1200, limit: int = 10) -> list[str]:
+    return _list_generic(lat, lon, radius_m, 'leisure~"^(park|swimming_pool)$"', limit)
+
+
+def list_visites(lat: float, lon: float, radius_m: int = 1200, limit: int = 10) -> list[str]:
+    return _list_generic(lat, lon, radius_m, 'tourism~"^(attraction|museum)$"', limit)
+
+
 def list_metro_lines(lat: float, lon: float, radius_m: int = 1200, limit: int = 3) -> list[dict]:
     q = f"""
 [out:json][timeout:25];
