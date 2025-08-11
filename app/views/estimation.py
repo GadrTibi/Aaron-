@@ -66,44 +66,29 @@ def render(config):
     # ---- Quartier & transports (Slide 4) ----
     st.subheader("Quartier (Slide 4)")
     quartier_texte = st.text_area("Texte d'intro du quartier (paragraphe)", st.session_state.get("q_txt", "Texte libre saisi par l'utilisateur."), key="q_txt")
-    if st.button("Remplir Transports"):
+    if st.button("Remplir Transports (auto)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                tr = fetch_transports(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
-                st.session_state["__prefill"] = {
-                    "q_tx": tr.get("taxi", ""),
-                    "q_metro": tr.get("metro", ""),
-                    "q_bus": tr.get("bus", ""),
-                }
-                st.rerun()
-            except Exception as e:
-                st.warning(f"Transports non chargés: {e}")
-    colQ1, colQ2, colQ3 = st.columns(3)
-    with colQ1:
-        transport_taxi = st.text_input("Transport - Taxi", st.session_state.get("q_tx", "Station de taxi (…)"), key="q_tx")
-    with colQ2:
-        transport_metro = st.text_input("Transport - Métro", st.session_state.get("q_metro", "Métro …"), key="q_metro")
-    with colQ3:
-        transport_bus = st.text_input("Transport - Bus", st.session_state.get("q_bus", "Bus …"), key="q_bus")
-
-    if st.button("Renseigner lignes métro & bus (auto)"):
-        lat, lon = _geocode_main_address()
-        if lat is not None:
-            try:
-                metro = list_metro_lines(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
-                bus = list_bus_lines(lat, lon, radius_m=st.session_state.get("radius_m", 1200))
+                radius = st.session_state.get("radius_m", 1200)
+                tr = fetch_transports(lat, lon, radius_m=radius)
+                metro = list_metro_lines(lat, lon, radius_m=radius)
+                bus = list_bus_lines(lat, lon, radius_m=radius)
+                st.session_state["q_tx"] = tr.get("taxi", "")
                 st.session_state['metro_lines_auto'] = metro
                 st.session_state['bus_lines_auto'] = bus
             except Exception as e:
-                st.warning(f"Lignes non chargées: {e}")
+                st.warning(f"Transports non chargés: {e}")
         else:
+            st.session_state["q_tx"] = ""
             st.session_state['metro_lines_auto'] = []
             st.session_state['bus_lines_auto'] = []
+    taxi_txt = st.session_state.get("q_tx", "")
     metro_auto = st.session_state.get('metro_lines_auto', [])
     bus_auto = st.session_state.get('bus_lines_auto', [])
     metro_refs = ", ".join([f"Ligne {x.get('ref')}" for x in metro_auto if x.get('ref')])
     bus_refs = ", ".join([f"Bus {x.get('ref')}" for x in bus_auto if x.get('ref')])
+    st.write(f"Taxi : {taxi_txt or '—'}")
     st.write(f"Métro : {metro_refs or '—'}")
     st.write(f"Bus : {bus_refs or '—'}")
 
@@ -270,8 +255,6 @@ def render(config):
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
         "[[QUARTIER_TEXTE]]": st.session_state.get("q_txt",""),
         "[[TRANSPORT_TAXI_TEXTE]]": st.session_state.get('q_tx', ''),
-        "[[TRANSPORT_METRO_TEXTE]]": st.session_state.get('q_metro', ''),
-        "[[TRANSPORT_BUS_TEXTE]]": st.session_state.get('q_bus', ''),
         "[[TRANSPORT_METRO_LIGNES]]": metro_str,
         "[[TRANSPORT_BUS_LIGNES]]": bus_str,
         "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
