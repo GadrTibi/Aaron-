@@ -13,6 +13,7 @@ from app.services.poi import (
 )
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
+from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
 
@@ -288,7 +289,7 @@ def render(config):
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
-        "[[QUARTIER_TEXTE]]": st.session_state.get("q_txt",""),
+        "[[QUARTIER_INTRO]]": st.session_state.get("q_txt",""),
         "[[TRANSPORT_TAXI_TEXTE]]": st.session_state.get('q_tx', ''),
         "[[TRANSPORT_METRO_TEXTE]]": metro_str,
         "[[TRANSPORT_BUS_TEXTE]]": bus_str,
@@ -357,6 +358,16 @@ def render(config):
         if not est_tpl_path or not os.path.exists(est_tpl_path):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
+
+        lat, lon = _geocode_main_address()
+        if lat is not None and lon is not None:
+            try:
+                m_path = build_static_map(lat, lon)
+                image_by_shape["MAP_IMAGE"] = m_path
+                tmp_files.append(m_path)
+            except Exception:
+                pass
+
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
         generate_estimation_pptx(est_tpl_path, pptx_out, mapping, image_by_shape=image_by_shape or None)
         st.success(f"OK: {pptx_out}")

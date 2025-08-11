@@ -36,7 +36,8 @@ def _replace_token_in_paragraph(paragraph, token: str, value: str) -> bool:
     while True:
         combined, segs = _rebuild_index(paragraph)
         idx = combined.find(token)
-        if idx < 0: break
+        if idx < 0:
+            break
         start, end = idx, idx + len(token)
         s_run, s_off, e_run, e_off = _locate_in_runs(segs, start, end)
         style_run = paragraph.runs[s_run]
@@ -64,25 +65,63 @@ def insert_image(slide, image_path: str, left=Inches(1), top=Inches(3), width=In
     slide.shapes.add_picture(image_path, left, top, width=width)
 
 def replace_image_by_shape_name(prs, shape_name: str, image_path: str):
-    target = None; target_slide = None
+    target = None
+    target_slide = None
     for slide in prs.slides:
         for sh in _walk_shapes(slide.shapes):
             try:
                 if (sh.name or '').strip() == shape_name:
-                    target = sh; target_slide = slide; break
+                    target = sh
+                    target_slide = slide
+                    break
             except Exception:
                 continue
-        if target: break
-    if not target: return False
+        if target:
+            break
+    if not target:
+        return False
     try:
-        left = target.left; top = target.top; width = target.width; height = target.height
-        sp = target._element; sp.getparent().remove(sp)
+        left = target.left
+        top = target.top
+        width = target.width
+        height = target.height
+        sp = target._element
+        sp.getparent().remove(sp)
         target_slide.shapes.add_picture(image_path, left, top, width=width, height=height)
         return True
     except Exception:
         return False
 
-def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict[str, str], chart_image: Optional[str]=None, image_by_shape: Optional[Dict[str, str]]=None) -> None:
+def fill_shape_with_picture_by_name(prs, shape_name: str, image_path: str) -> bool:
+    target = None
+    for slide in prs.slides:
+        for sh in _walk_shapes(slide.shapes):
+            try:
+                if (sh.name or '').strip() == shape_name:
+                    target = sh
+                    break
+            except Exception:
+                continue
+        if target:
+            break
+    if not target:
+        return False
+    try:
+        if hasattr(target, "fill") and hasattr(target.fill, "user_picture"):
+            target.fill.user_picture(image_path)
+            target.fill.transparency = 0
+            return True
+    except Exception:
+        pass
+    return False
+
+def generate_estimation_pptx(
+    template_path: str,
+    output_path: str,
+    mapping: Dict[str, str],
+    chart_image: Optional[str] = None,
+    image_by_shape: Optional[Dict[str, str]] = None,
+) -> None:
     prs = Presentation(template_path)
     for slide in prs.slides:
         replace_text_preserving_style(slide.shapes, mapping)
@@ -95,10 +134,21 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
                 texts.append(sh.text_frame.text or "")
         text = "\n".join(texts)
         if "Vos revenus" in text or "vos revenus" in text.lower():
-            target_slide = slide; break
-    if target_slide is None: target_slide = prs.slides[-1]
-    if chart_image: insert_image(target_slide, chart_image)
+            target_slide = slide
+            break
+    if target_slide is None:
+        target_slide = prs.slides[-1]
+    if chart_image:
+        insert_image(target_slide, chart_image)
     if image_by_shape:
         for shape_name, img_path in image_by_shape.items():
-            if img_path: replace_image_by_shape_name(prs, shape_name, img_path)
+            if not img_path:
+                continue
+            mask_name = shape_name.replace("_IMG", "_MASK")
+            if fill_shape_with_picture_by_name(prs, mask_name, img_path):
+                continue
+            if mask_name != shape_name and fill_shape_with_picture_by_name(prs, shape_name, img_path):
+                continue
+            replace_image_by_shape_name(prs, shape_name, img_path)
     prs.save(output_path)
+
