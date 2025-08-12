@@ -1,4 +1,5 @@
-import os, hashlib, mimetypes
+import os, hashlib, mimetypes, io
+from PIL import Image
 from app.services.http_fetch import download_binary
 
 def save_url_to_cache(url: str, cache_dir: str) -> str:
@@ -10,9 +11,14 @@ def save_url_to_cache(url: str, cache_dir: str) -> str:
         if cand in url.lower():
             ext = cand if cand != ".jpeg" else ".jpg"
             break
-    name = hashlib.sha1(url.encode("utf-8")).hexdigest()[:16] + ext
-    path = os.path.join(cache_dir, name)
-    with open(path, "wb") as f:
-        f.write(data)
+    name = hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
+    if ext == ".webp":
+        im = Image.open(io.BytesIO(data)).convert("RGBA")
+        path = os.path.join(cache_dir, name + ".png")
+        im.save(path, "PNG")
+    else:
+        path = os.path.join(cache_dir, name + ext)
+        with open(path, "wb") as f:
+            f.write(data)
     return path
 

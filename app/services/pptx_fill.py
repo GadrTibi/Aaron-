@@ -4,6 +4,8 @@ from pptx.util import Inches
 from PIL import Image
 import os
 
+from app.services.pptx_images import inject_visit_image
+
 
 def _walk_shapes(shapes):
     """Yield all shapes recursively, diving into groups."""
@@ -69,14 +71,8 @@ def insert_image(slide, image_path: str, left=Inches(1), top=Inches(3), width=In
     slide.shapes.add_picture(image_path, left, top, width=width)
 
 
-def inject_masked_image(prs, shape_name: str, image_path: str) -> bool:
-    """
-    Recherche récursivement la forme par son nom dans toutes les diapos et groupes,
-    et remplit son fond avec l'image fournie sans supprimer la forme,
-    pour conserver le masque rond.
-    Retourne True si l'injection a réussi, False sinon.
-    """
-
+def replace_image_by_shape_name(prs, shape_name: str, image_path: str) -> bool:
+    """Remplace une image en la retrouvant par son nom."""
     try:
         ext = os.path.splitext(image_path)[1].lower()
         if ext not in (".jpg", ".jpeg", ".png"):
@@ -91,12 +87,14 @@ def inject_masked_image(prs, shape_name: str, image_path: str) -> bool:
         for sh in _walk_shapes(slide.shapes):
             try:
                 if (sh.name or "").strip() == shape_name:
-                    sh.fill.user_picture(image_path)
+                    left, top, width, height = sh.left, sh.top, sh.width, sh.height
                     try:
-                        sh.fill.transparency = 0
+                        sp = sh.element
+                        sp.getparent().remove(sp)
                     except Exception:
                         pass
-                    print(f"[OK] Image injectée dans {shape_name}")
+                    slide.shapes.add_picture(image_path, left, top, width=width, height=height)
+                    print(f"[OK] Image remplacée dans {shape_name}")
                     return True
             except Exception:
                 continue
@@ -124,8 +122,11 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
     if chart_image:
         insert_image(target_slide, chart_image)
     if image_by_shape:
-        for shape_name in ("VISITE_1_MASK", "VISITE_2_MASK"):
-            img_path = image_by_shape.get(shape_name)
-            if img_path:
-                inject_masked_image(prs, shape_name, img_path)
+        for shape_name, img_path in image_by_shape.items():
+            if not img_path:
+                continue
+            if shape_name in ("VISITE_1_MASK", "VISITE_2_MASK"):
+                inject_visit_image(prs, shape_name, img_path)
+            else:
+                replace_image_by_shape_name(prs, shape_name, img_path)
     prs.save(output_path)
