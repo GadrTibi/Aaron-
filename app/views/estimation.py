@@ -165,10 +165,10 @@ def render(config):
     new_v2 = sel_vis[1] if len(sel_vis) > 1 else ""
     if new_v1 != prev_v1:
         st.session_state['visite1_imgs'] = []
-        st.session_state.pop('v1_img_choice', None)
+        st.session_state.pop('visite1_choice', None)
     if new_v2 != prev_v2:
         st.session_state['visite2_imgs'] = []
-        st.session_state.pop('v2_img_choice', None)
+        st.session_state.pop('visite2_choice', None)
     st.session_state['v1'] = new_v1
     st.session_state['v2'] = new_v2
 
@@ -197,9 +197,10 @@ def render(config):
                 for url, col in zip(row, cols):
                     col.image(url, width=200)
             st.radio(
-                "Sélection", list(range(len(imgs))),
-                format_func=lambda i: f"Image {i+1}",
-                key="v1_img_choice",
+                "Sélection", list(range(1, len(imgs)+1)),
+                format_func=lambda i: f"Image {i}",
+                key="visite1_choice",
+                index=None,
             )
     with cimg2:
         if st.button("Chercher images pour Visite 2"):
@@ -220,9 +221,10 @@ def render(config):
                 for url, col in zip(row, cols):
                     col.image(url, width=200)
             st.radio(
-                "Sélection", list(range(len(imgs))),
-                format_func=lambda i: f"Image {i+1}",
-                key="v2_img_choice",
+                "Sélection", list(range(1, len(imgs)+1)),
+                format_func=lambda i: f"Image {i}",
+                key="visite2_choice",
+                index=None,
             )
     st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
 
@@ -324,7 +326,7 @@ def render(config):
     # Images for VISITE_1/2
     image_by_shape = {}
     tmp_files = []
-    def _download(url):
+    def _download_to_tmp(url):
         try:
             r = requests.get(url, timeout=20)
             r.raise_for_status()
@@ -335,20 +337,25 @@ def render(config):
         except Exception:
             return None
 
-    if st.session_state.get('visite1_imgs') and st.session_state.get('v1_img_choice') is not None:
-        idx = st.session_state['v1_img_choice']
-        arr = st.session_state['visite1_imgs']
-        if 0 <= idx < len(arr):
-            p = _download(arr[idx])
-            if p:
-                image_by_shape["VISITE_1_IMG"] = p
-    if st.session_state.get('visite2_imgs') and st.session_state.get('v2_img_choice') is not None:
-        idx = st.session_state['v2_img_choice']
-        arr = st.session_state['visite2_imgs']
-        if 0 <= idx < len(arr):
-            p = _download(arr[idx])
-            if p:
-                image_by_shape["VISITE_2_IMG"] = p
+    # VISITE 1
+    urls1 = st.session_state.get("visite1_imgs") or []
+    choice1 = st.session_state.get("visite1_choice")
+    if urls1 and choice1:
+        idx = int(choice1) - 1
+        if 0 <= idx < len(urls1):
+            p1 = _download_to_tmp(urls1[idx])
+            if p1:
+                image_by_shape["VISITE_1_MASK"] = p1
+
+    # VISITE 2
+    urls2 = st.session_state.get("visite2_imgs") or []
+    choice2 = st.session_state.get("visite2_choice")
+    if urls2 and choice2:
+        idx = int(choice2) - 1
+        if 0 <= idx < len(urls2):
+            p2 = _download_to_tmp(urls2[idx])
+            if p2:
+                image_by_shape["VISITE_2_MASK"] = p2
 
     # ---- Generate Estimation ----
     st.subheader("Générer l'Estimation (PPTX)")
