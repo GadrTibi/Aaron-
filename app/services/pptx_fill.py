@@ -2,21 +2,37 @@ from typing import Dict, Optional, List, Tuple
 from pptx import Presentation
 from pptx.util import Inches
 
+
 def _walk_shapes(shapes):
+    """Yield all shapes recursively, diving into groups."""
     for sh in shapes:
         yield sh
+        # If the shape is a group, dive into its children and yield them too
         if hasattr(sh, "shapes"):
             for sub in _walk_shapes(sh.shapes):
                 yield sub
 
+
 def _find_shape_by_name(prs, shape_name: str):
-    for slide in prs.slides:
-        for sh in _walk_shapes(slide.shapes):
+    """Return shape and slide owning it by its name, searching inside groups."""
+
+    def _search(shapes):
+        for sh in shapes:
             try:
                 if (sh.name or "").strip() == shape_name:
-                    return sh, slide
+                    return sh
             except Exception:
                 pass
+            if hasattr(sh, "shapes"):
+                found = _search(sh.shapes)
+                if found:
+                    return found
+        return None
+
+    for slide in prs.slides:
+        found = _search(slide.shapes)
+        if found:
+            return found, slide
     return None, None
 
 def _rebuild_index(paragraph) -> tuple[str, list[tuple[int,int]]]:
@@ -124,16 +140,20 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
                 texts.append(sh.text_frame.text or "")
         text = "\n".join(texts)
         if "Vos revenus" in text or "vos revenus" in text.lower():
-            target_slide = slide; break
-    if target_slide is None: target_slide = prs.slides[-1]
-    if chart_image: insert_image(target_slide, chart_image)
+            target_slide = slide
+            break
+    if target_slide is None:
+        target_slide = prs.slides[-1]
+    if chart_image:
+        insert_image(target_slide, chart_image)
     if image_by_shape:
         for shape_name, img_path in image_by_shape.items():
             if not img_path:
                 continue
-            ok = False
             if shape_name.endswith("_MASK"):
                 ok = fill_shape_with_picture_by_name(prs, shape_name, img_path)
-            if not ok:
+                if not ok:
+                    print(f"[WARN] Shape {shape_name} non trouvé dans le PPTX")
+            else:
                 replace_image_by_shape_name(prs, shape_name, img_path)
     prs.save(output_path)
