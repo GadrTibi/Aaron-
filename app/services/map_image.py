@@ -1,9 +1,12 @@
 import os
 import math
 import tempfile
-from typing import Tuple
+from typing import Optional, Tuple
 
-from staticmap import StaticMap, CircleMarker, Polygon
+try:
+    from staticmap import StaticMap, CircleMarker, Polygon
+except Exception:  # pragma: no cover - optional dependency
+    StaticMap = CircleMarker = Polygon = None
 
 
 def _circle_coords(lat: float, lon: float, radius_m: float, steps: int = 36):
@@ -24,11 +27,14 @@ def build_static_map(
     lon: float,
     radius_m: float = 300,
     size: Tuple[int, int] = (600, 600),
-) -> str:
+) -> Optional[str]:
     """Generate a static map PNG around ``lat``/``lon`` with a red marker and circle.
 
     Returns the path to a temporary PNG file.
     """
+    if StaticMap is None or CircleMarker is None or Polygon is None:
+        return None
+
     m = StaticMap(size[0], size[1])
     m.add_marker(CircleMarker((lon, lat), "red", 12))
     circle = Polygon(
