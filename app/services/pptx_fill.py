@@ -146,10 +146,14 @@ def generate_book_pptx(template_path: str, output_path: str, mapping: Dict[str, 
         for shape_name, img_path in image_by_shape.items():
             if not img_path:
                 continue
-            if shape_name == "BOOK_MAP_MASK":
+            if shape_name in ("MAP_BOOK_MASK", "BOOK_MAP_MASK"):
                 # Always replace the shape by the map image (full rectangle)
                 replace_image_by_shape_name(prs, shape_name, img_path)
             elif shape_name in (
+                "PORTE_ENTREE_MASK",
+                "ENTREE_MASK",
+                "APPARTEMENT_MASK",
+                # Anciennes conventions
                 "BOOK_ACCESS_PHOTO_PORTE",
                 "BOOK_ACCESS_PHOTO_ENTREE",
                 "BOOK_ACCESS_PHOTO_APPART",

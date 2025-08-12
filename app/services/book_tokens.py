@@ -28,26 +28,33 @@ def build_book_mapping(ss: dict) -> dict:
     bus_str   = ", ".join([f"Bus {x.get('ref')}"   for x in bus_auto   if x.get('ref')])
 
     mapping = {
-        # Adresse/Transports Slide 4
+        # Adresse/Transports (Slide 4)
         "[[ADRESSE]]": adresse,
 
-        # Convention “Estimation”
+        # Convention “Estimation” pour les transports
         "[[TRANSPORT_TAXI_TEXTE]]": taxi_txt,
         "[[TRANSPORT_METRO_TEXTE]]": metro_str,
         "[[TRANSPORT_BUS_TEXTE]]": bus_str,
 
-        # Convention alternative (si le template Book utilise ces noms) — optionnel
+        # Compatibilité alternative (si le template Book utilise ces noms)
         "[[TAXI_TEXTE]]": taxi_txt,
         "[[TRANSPORT_METRO_TEXTE]]": metro_str,
         "[[TRANSPORT_BUS_TEXTE]]": bus_str,
 
         # Slide 5 (Instructions)
-        "[[BOOK_ACC_PORTE_TEXTE]]": ss.get("bk_acc_porte_texte", ""),
-        "[[BOOK_ACC_ENTREE_TEXTE]]": ss.get("bk_acc_entree_texte", ""),
-        "[[BOOK_ACC_APPART_TEXTE]]": ss.get("bk_acc_appart_texte", ""),
+        "[[PORTE_ENTREE_TEXTE]]": ss.get("bk_porte_entree_texte", ""),
+        "[[ENTREE_TEXTE]]": ss.get("bk_entree_texte", ""),
+        "[[APPARTEMENT_TEXTE]]": ss.get("bk_appartement_texte", ""),
+        # Anciennes conventions (pour compatibilité éventuelle)
+        "[[BOOK_ACC_PORTE_TEXTE]]": ss.get("bk_porte_entree_texte", ""),
+        "[[BOOK_ACC_ENTREE_TEXTE]]": ss.get("bk_entree_texte", ""),
+        "[[BOOK_ACC_APPART_TEXTE]]": ss.get("bk_appartement_texte", ""),
 
         # Slide 8 (Wifi)
-        "[[WIFI_NETWORK_NAME]]": ss.get("bk_wifi_network", ""),
-        "[[WIFI_PASSWORD]]": ss.get("bk_wifi_password", ""),
+        "[[NETWORK_NAME]]": ss.get("bk_network_name", ""),
+        "[[NETWORK_PASSWORD]]": ss.get("bk_network_password", ""),
+        # Anciennes conventions
+        "[[WIFI_NETWORK_NAME]]": ss.get("bk_network_name", ""),
+        "[[WIFI_PASSWORD]]": ss.get("bk_network_password", ""),
     }
     return mapping

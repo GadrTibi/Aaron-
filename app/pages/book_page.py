@@ -70,9 +70,9 @@ def render(config: dict) -> None:
 
     # ---- Instructions (Slide 5) ----
     st.subheader("Instructions (Slide 5)")
-    st.text_area("Texte porte", key="bk_acc_porte_texte")
-    st.text_area("Texte entrée", key="bk_acc_entree_texte")
-    st.text_area("Texte appartement", key="bk_acc_appart_texte")
+    st.text_area("Texte porte", key="bk_porte_entree_texte")
+    st.text_area("Texte entrée", key="bk_entree_texte")
+    st.text_area("Texte appartement", key="bk_appartement_texte")
 
     img_keys = ["book_img_porte", "book_img_entree", "book_img_appart"]
     imgs_exist = all(st.session_state.get(k) for k in img_keys)
@@ -104,8 +104,8 @@ def render(config: dict) -> None:
 
     # ---- Wifi ----
     st.subheader("Wifi (Slide 8)")
-    st.text_input("Nom du réseau", key="bk_wifi_network")
-    st.text_input("Mot de passe", key="bk_wifi_password")
+    st.text_input("Nom du réseau", key="bk_network_name")
+    st.text_input("Mot de passe", key="bk_network_password")
 
     st.markdown("---")
     if st.button("Générer le BOOK (PPTX)"):
@@ -121,14 +121,14 @@ def render(config: dict) -> None:
         lon = st.session_state.get("geo_lon")
         if lat and lon:
             map_path = build_static_map(lat, lon, pixel_radius=60, size=(900, 900))
-            image_by_shape["BOOK_MAP_MASK"] = map_path
+            image_by_shape["MAP_BOOK_MASK"] = map_path
 
         if st.session_state.get("book_img_porte"):
-            image_by_shape["BOOK_ACCESS_PHOTO_PORTE"] = st.session_state["book_img_porte"]
+            image_by_shape["PORTE_ENTREE_MASK"] = st.session_state["book_img_porte"]
         if st.session_state.get("book_img_entree"):
-            image_by_shape["BOOK_ACCESS_PHOTO_ENTREE"] = st.session_state["book_img_entree"]
+            image_by_shape["ENTREE_MASK"] = st.session_state["book_img_entree"]
         if st.session_state.get("book_img_appart"):
-            image_by_shape["BOOK_ACCESS_PHOTO_APPART"] = st.session_state["book_img_appart"]
+            image_by_shape["APPARTEMENT_MASK"] = st.session_state["book_img_appart"]
 
         print("BOOK image_by_shape:", image_by_shape)
         out_path = os.path.join(OUT_DIR, f"Book - {st.session_state.get('bien_addr','bien')}.pptx")
