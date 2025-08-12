@@ -14,6 +14,7 @@ from app.services.poi import (
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
 from app.services.image_cache import save_url_to_cache
+from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
 
@@ -73,6 +74,8 @@ def render(config):
             lat, lon = geocode_address(addr)
         if lat is None:
             st.warning("Adresse introuvable…")
+        st.session_state["geo_lat"] = lat
+        st.session_state["geo_lon"] = lon
         return lat, lon
 
     # ---- Quartier & transports (Slide 4) ----
@@ -383,6 +386,18 @@ def render(config):
     if p2:
         image_by_shape["VISITE_2_MASK"] = p2
 
+    # === MAP ===
+    lat = st.session_state.get("geo_lat")
+    lon = st.session_state.get("geo_lon")
+    if lat and lon:
+        try:
+            map_path = build_static_map(lat, lon, pixel_radius=60, size=(900, 900))
+            image_by_shape["MAP_MASK"] = map_path
+        except Exception as e:
+            st.warning(f"Carte non générée: {e}")
+
+    print("DBG image_by_shape (final):", image_by_shape)
+
     # ---- Generate Estimation ----
     st.subheader("Générer l'Estimation (PPTX)")
     est_tpl_path = resolve_est_path(chosen_est)
@@ -391,7 +406,6 @@ def render(config):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        print("DBG image_by_shape (with UA):", image_by_shape)
         generate_estimation_pptx(est_tpl_path, pptx_out, mapping, image_by_shape=image_by_shape or None)
         st.success(f"OK: {pptx_out}")
         with open(pptx_out, "rb") as f:

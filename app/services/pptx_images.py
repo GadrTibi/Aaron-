@@ -67,7 +67,7 @@ def _to_circular_png(src_path: str, size_wh: Tuple[int,int]) -> bytes:
     out.save(bio, format="PNG")
     return bio.getvalue()
 
-def inject_visit_image(prs: Presentation, tag: str, image_path: str) -> bool:
+def inject_tagged_image(prs: Presentation, tag: str, image_path: str) -> bool:
     """
     1) Trouve le shape par nom/alt-text (tag).
     2) Si AUTO_SHAPE -> fill.user_picture(image_path) et return True.
@@ -107,3 +107,6 @@ def inject_visit_image(prs: Presentation, tag: str, image_path: str) -> bool:
     except Exception as e:
         print(f"[ERR] Fallback PNG circulaire a échoué pour {tag}: {e}")
         return False
+
+# Compatibilité : ancien nom
+inject_visit_image = inject_tagged_image

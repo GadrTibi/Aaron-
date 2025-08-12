@@ -4,7 +4,7 @@ from pptx.util import Inches
 from PIL import Image
 import os
 
-from app.services.pptx_images import inject_visit_image
+from app.services.pptx_images import inject_tagged_image
 
 
 def _walk_shapes(shapes):
@@ -125,8 +125,8 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
         for shape_name, img_path in image_by_shape.items():
             if not img_path:
                 continue
-            if shape_name in ("VISITE_1_MASK", "VISITE_2_MASK"):
-                inject_visit_image(prs, shape_name, img_path)
+            if shape_name in ("VISITE_1_MASK", "VISITE_2_MASK", "MAP_MASK"):
+                inject_tagged_image(prs, shape_name, img_path)
             else:
                 replace_image_by_shape_name(prs, shape_name, img_path)
     prs.save(output_path)
