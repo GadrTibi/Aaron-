@@ -1,4 +1,4 @@
-import os, requests, hashlib
+import os
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
@@ -13,6 +13,7 @@ from app.services.poi import (
 )
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
+from app.services.image_cache import save_url_to_cache
 
 from .utils import _sanitize_filename, list_templates
 
@@ -62,20 +63,6 @@ def render(config):
         if label == "estimation_template.pptx (héritage)":
             return legacy_est
         return os.path.join(EST_TPL_DIR, label)
-
-    def _save_url_to_cache(url: str, cache_dir: str) -> str:
-        r = requests.get(url, timeout=20)
-        r.raise_for_status()
-        ctype = r.headers.get("Content-Type", "")
-        ext = ".jpg"
-        if "png" in ctype:
-            ext = ".png"
-        name = hashlib.sha1(url.encode("utf-8")).hexdigest()[:16] + ext
-        os.makedirs(cache_dir, exist_ok=True)
-        path = os.path.join(cache_dir, name)
-        with open(path, "wb") as f:
-            f.write(r.content)
-        return path
 
     def _geocode_main_address():
         addr = st.session_state.get("bien_addr", "")
@@ -276,8 +263,8 @@ def render(config):
                 idx2 = int(choice2) - 1
                 if 0 <= idx1 < len(urls1) and 0 <= idx2 < len(urls2):
                     try:
-                        path1 = _save_url_to_cache(urls1[idx1], IMG_CACHE_DIR)
-                        path2 = _save_url_to_cache(urls2[idx2], IMG_CACHE_DIR)
+                        path1 = save_url_to_cache(urls1[idx1], IMG_CACHE_DIR)
+                        path2 = save_url_to_cache(urls2[idx2], IMG_CACHE_DIR)
                         st.session_state['visite1_img_path'] = path1
                         st.session_state['visite2_img_path'] = path2
                         st.session_state['visites_locked'] = True
@@ -404,7 +391,7 @@ def render(config):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        print("DBG image_by_shape (locked):", image_by_shape)
+        print("DBG image_by_shape (with UA):", image_by_shape)
         generate_estimation_pptx(est_tpl_path, pptx_out, mapping, image_by_shape=image_by_shape or None)
         st.success(f"OK: {pptx_out}")
         with open(pptx_out, "rb") as f:
