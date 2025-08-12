@@ -19,9 +19,9 @@ def main() -> None:
     """Configure Streamlit and launch the packaged app."""
 
     # Force Streamlit settings via environment variables (no CLI flags).
-    os.environ["STREAMLIT_GLOBAL_DEVELOPMENTMODE"] = "false"
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
     os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
-    os.environ["STREAMLIT_BROWSER_GATHERUSAGESTATS"] = "false"
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
 
     # Port can be overridden via MFY_PORT, otherwise default to 8501.
     os.environ["STREAMLIT_SERVER_PORT"] = os.getenv("MFY_PORT", "8501")
