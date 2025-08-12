@@ -13,6 +13,7 @@ from app.services.poi import (
 )
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
+from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
 
@@ -324,6 +325,15 @@ def render(config):
     # Images for VISITE_1/2
     image_by_shape = {}
     tmp_files = []
+    lat, lon = _geocode_main_address()
+    if lat is not None:
+        try:
+            map_path = build_static_map(lat, lon)
+            tmp_files.append(map_path)
+            image_by_shape["MAP_IMAGE"] = map_path
+        except Exception:
+            pass
+
     def _download(url):
         try:
             r = requests.get(url, timeout=20)
