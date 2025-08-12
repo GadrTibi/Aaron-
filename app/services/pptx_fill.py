@@ -12,29 +12,6 @@ def _walk_shapes(shapes):
             for sub in _walk_shapes(sh.shapes):
                 yield sub
 
-
-def _find_shape_by_name(prs, shape_name: str):
-    """Return shape and slide owning it by its name, searching inside groups."""
-
-    def _search(shapes):
-        for sh in shapes:
-            try:
-                if (sh.name or "").strip() == shape_name:
-                    return sh
-            except Exception:
-                pass
-            if hasattr(sh, "shapes"):
-                found = _search(sh.shapes)
-                if found:
-                    return found
-        return None
-
-    for slide in prs.slides:
-        found = _search(slide.shapes)
-        if found:
-            return found, slide
-    return None, None
-
 def _rebuild_index(paragraph) -> tuple[str, list[tuple[int,int]]]:
     segs, parts = [], []
     for i, r in enumerate(paragraph.runs):
@@ -89,43 +66,59 @@ def replace_text_preserving_style(shapes, mapping: Dict[str, str]) -> None:
 def insert_image(slide, image_path: str, left=Inches(1), top=Inches(3), width=Inches(8)) -> None:
     slide.shapes.add_picture(image_path, left, top, width=width)
 
-def replace_image_by_shape_name(prs, shape_name: str, image_path: str):
-    target = None; target_slide = None
+
+def inject_masked_image(prs, shape_name: str, image_path: str) -> bool:
+    """
+    Recherche récursivement la forme par son nom dans toutes les diapos et groupes,
+    et remplit son fond avec l'image fournie sans supprimer la forme,
+    pour conserver le masque rond.
+    Retourne True si l'injection a réussi, False sinon.
+    """
+    import os
+    import tempfile
+    from PIL import Image
+
+    target = None
     for slide in prs.slides:
         for sh in _walk_shapes(slide.shapes):
             try:
-                if (sh.name or '').strip() == shape_name:
-                    target = sh; target_slide = slide; break
+                if (sh.name or "").strip() == shape_name:
+                    target = sh
+                    break
             except Exception:
                 continue
-        if target: break
-    if not target: return False
-    try:
-        left = target.left; top = target.top; width = target.width; height = target.height
-        sp = target._element; sp.getparent().remove(sp)
-        target_slide.shapes.add_picture(image_path, left, top, width=width, height=height)
-        return True
-    except Exception:
+        if target:
+            break
+    if not target:
+        print(f"[WARN] Shape {shape_name} introuvable dans le PPTX.")
         return False
 
-def fill_shape_with_picture_by_name(prs, shape_name: str, image_path: str) -> bool:
-    """
-    Remplit un AutoShape existant avec une image, SANS le supprimer,
-    pour conserver le masque (ex. cercle).
-    """
-    sh, _ = _find_shape_by_name(prs, shape_name)
-    if not sh:
-        return False
+    tmp_path = None
     try:
-        sh.fill.user_picture(image_path)
-        # sécurité :
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext not in (".png", ".jpg", ".jpeg"):
+            with Image.open(image_path) as img:
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                img.save(tmp.name, format="PNG")
+                tmp_path = tmp.name
+                image_path = tmp.name
+
+        target.fill.user_picture(image_path)
         try:
-            sh.fill.transparency = 0
+            target.fill.transparency = 0
         except Exception:
             pass
+        print(f"[OK] Image injectée dans {shape_name}")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[WARN] Impossible d'injecter l'image dans {shape_name}: {e}")
         return False
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict[str, str], chart_image: Optional[str]=None, image_by_shape: Optional[Dict[str, str]]=None) -> None:
     prs = Presentation(template_path)
@@ -147,13 +140,8 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
     if chart_image:
         insert_image(target_slide, chart_image)
     if image_by_shape:
-        for shape_name, img_path in image_by_shape.items():
-            if not img_path:
-                continue
-            if shape_name.endswith("_MASK"):
-                ok = fill_shape_with_picture_by_name(prs, shape_name, img_path)
-                if not ok:
-                    print(f"[WARN] Shape {shape_name} non trouvé dans le PPTX")
-            else:
-                replace_image_by_shape_name(prs, shape_name, img_path)
+        for shape_name in ("VISITE_1_MASK", "VISITE_2_MASK"):
+            img_path = image_by_shape.get(shape_name)
+            if img_path:
+                inject_masked_image(prs, shape_name, img_path)
     prs.save(output_path)
