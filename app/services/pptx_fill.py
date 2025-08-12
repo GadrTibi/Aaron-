@@ -1,6 +1,7 @@
 from typing import Dict, Optional, List, Tuple
 from pptx import Presentation
 from pptx.util import Inches
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 def _walk_shapes(shapes):
     for sh in shapes:
@@ -82,6 +83,18 @@ def replace_image_by_shape_name(prs, shape_name: str, image_path: str):
     except Exception:
         return False
 
+
+def fill_shape_with_picture_by_name(prs, shape_name: str, image_path: str) -> bool:
+    for slide in prs.slides:
+        for sh in _walk_shapes(slide.shapes):
+            try:
+                if (sh.name or "").strip() == shape_name and sh.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
+                    sh.fill.user_picture(image_path)
+                    return True
+            except Exception:
+                continue
+    return False
+
 def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict[str, str], chart_image: Optional[str]=None, image_by_shape: Optional[Dict[str, str]]=None) -> None:
     prs = Presentation(template_path)
     for slide in prs.slides:
@@ -100,5 +113,9 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
     if chart_image: insert_image(target_slide, chart_image)
     if image_by_shape:
         for shape_name, img_path in image_by_shape.items():
-            if img_path: replace_image_by_shape_name(prs, shape_name, img_path)
+            if not img_path:
+                continue
+            if not fill_shape_with_picture_by_name(prs, shape_name, img_path):
+                replace_image_by_shape_name(prs, shape_name, img_path)
     prs.save(output_path)
+

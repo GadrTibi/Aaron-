@@ -13,6 +13,7 @@ from app.services.poi import (
 )
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
+from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
 
@@ -349,6 +350,15 @@ def render(config):
             p = _download(arr[idx])
             if p:
                 image_by_shape["VISITE_2_IMG"] = p
+
+    lat = st.session_state.get("geo_lat")
+    lon = st.session_state.get("geo_lon")
+    if lat and lon:
+        try:
+            map_path = build_static_map(lat, lon, pixel_radius=60, size=(900, 900))
+            image_by_shape["MAP_IMAGE"] = map_path
+        except Exception:
+            pass
 
     # ---- Generate Estimation ----
     st.subheader("Générer l'Estimation (PPTX)")
