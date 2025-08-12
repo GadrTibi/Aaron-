@@ -13,6 +13,7 @@ from app.services.poi import (
 )
 from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
+from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
 
@@ -395,6 +396,18 @@ def render(config):
         image_by_shape["VISITE_1_MASK"] = p1
     if p2:
         image_by_shape["VISITE_2_MASK"] = p2
+
+    # Map for Slide 5
+    try:
+        addr = st.session_state.get("bien_addr", "")
+        lat, lon = geocode_address(addr)
+        if lat is not None and lon is not None:
+            map_path = build_static_map(lat, lon)
+            if map_path:
+                image_by_shape["MAP_IMAGE"] = map_path
+                tmp_files.append(map_path)
+    except Exception:
+        pass
 
     # ---- Generate Estimation ----
     st.subheader("Générer l'Estimation (PPTX)")
