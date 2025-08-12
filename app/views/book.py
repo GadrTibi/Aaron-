@@ -57,33 +57,6 @@ def render(config: dict) -> None:
             return None
         return os.path.join(BOOK_TPL_DIR, label)
 
-    # ---- Contenu principal ----
-    st.subheader("Contenu du Book")
-    st.text_input(
-        "Titre du book",
-        st.session_state.get("bk_titre", "Book - Présentation du bien"),
-        key="bk_titre",
-    )
-    intro_default = (
-        f"Adresse: {st.session_state.get('bien_addr', '')}\n"
-        f"Surface: {st.session_state.get('bien_surface', 0):.0f} m² - "
-        f"Pièces: {st.session_state.get('bien_pieces', 0)} - "
-        f"Couchages: {st.session_state.get('bien_couchages', 0)}\n"
-        "Points forts: (à détailler)\nPoints faibles: (à détailler)\n"
-    )
-    st.text_area(
-        "Intro",
-        st.session_state.get("bk_intro", intro_default),
-        key="bk_intro",
-    )
-
-    st.markdown(
-        "**Photos (seront placées sur des shapes nommées BOOK_PHOTO_1..3 si présentes dans le template)**"
-    )
-    photos = st.file_uploader(
-        "Importer jusqu'à 3 photos", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="bk_photos"
-    )
-
     # ---- Adresse & transports ----
     st.subheader("Adresse & transports (Slide 4)")
     addr_existing = st.session_state.get("bien_addr")
@@ -173,8 +146,6 @@ def render(config: dict) -> None:
     # ---- Mapping construction ----
     base_mapping = build_book_mapping(st.session_state)
     extra_mapping = {
-        "[[BOOK_TITRE]]": st.session_state.get("bk_titre", ""),
-        "[[BOOK_INTRO]]": st.session_state.get("bk_intro", ""),
         "[[NB_SURFACE]]": f"{st.session_state.get('bien_surface', 0):.0f}",
         "[[NB_PIECES]]": f"{int(st.session_state.get('bien_pieces', 0))}",
         "[[NB_SDB]]": f"{int(st.session_state.get('bien_sdb', 0))}",
@@ -184,13 +155,6 @@ def render(config: dict) -> None:
     mapping = {**base_mapping, **extra_mapping}
 
     image_by_shape: dict[str, str] = {}
-    if photos:
-        for idx, up in enumerate(photos[:3], start=1):
-            fd, pth = tempfile.mkstemp(suffix=os.path.splitext(up.name)[1])
-            os.close(fd)
-            with open(pth, "wb") as f:
-                f.write(up.getbuffer())
-            image_by_shape[f"BOOK_PHOTO_{idx}"] = pth
 
     lat = st.session_state.get("geo_lat")
     lon = st.session_state.get("geo_lon")
@@ -224,8 +188,8 @@ def render(config: dict) -> None:
             sections: list[str] = []
             build_book_pdf(
                 pdf_out,
-                st.session_state.get("bk_titre", ""),
-                st.session_state.get("bk_intro", ""),
+                "",
+                "",
                 sections,
             )
             st.success(f"OK: {pdf_out}")
