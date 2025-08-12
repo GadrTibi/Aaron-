@@ -1,4 +1,4 @@
-import os, tempfile, requests
+import os, requests, hashlib
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
@@ -20,6 +20,10 @@ def render(config):
     TPL_DIR = config['TPL_DIR']
     EST_TPL_DIR = config['EST_TPL_DIR']
     OUT_DIR = config['OUT_DIR']
+    IMG_CACHE_DIR = os.path.join(OUT_DIR, "_images_cache")
+
+    if "visites_locked" not in st.session_state:
+        st.session_state['visites_locked'] = False
 
     # ---------- APPLY PENDING PREFILL BEFORE WIDGETS ----------
     if "__prefill" in st.session_state and isinstance(st.session_state["__prefill"], dict):
@@ -58,6 +62,20 @@ def render(config):
         if label == "estimation_template.pptx (héritage)":
             return legacy_est
         return os.path.join(EST_TPL_DIR, label)
+
+    def _save_url_to_cache(url: str, cache_dir: str) -> str:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        ctype = r.headers.get("Content-Type", "")
+        ext = ".jpg"
+        if "png" in ctype:
+            ext = ".png"
+        name = hashlib.sha1(url.encode("utf-8")).hexdigest()[:16] + ext
+        os.makedirs(cache_dir, exist_ok=True)
+        path = os.path.join(cache_dir, name)
+        with open(path, "wb") as f:
+            f.write(r.content)
+        return path
 
     def _geocode_main_address():
         addr = st.session_state.get("bien_addr", "")
@@ -172,60 +190,106 @@ def render(config):
     st.session_state['v1'] = new_v1
     st.session_state['v2'] = new_v2
 
-    if "visite1_imgs" not in st.session_state: st.session_state.visite1_imgs = []
-    if "visite2_imgs" not in st.session_state: st.session_state.visite2_imgs = []
+    if "visite1_imgs" not in st.session_state:
+        st.session_state.visite1_imgs = []
+    if "visite2_imgs" not in st.session_state:
+        st.session_state.visite2_imgs = []
 
     address = st.session_state.get("bien_addr", "")
 
-    cimg1, cimg2 = st.columns(2)
-    with cimg1:
-        if st.button("Chercher images pour Visite 1"):
-            st.session_state.visite1_imgs = find_place_image_urls(
-                st.session_state.get("v1", "") or "",
-                city=address,
-                lang="fr",
-                limit=6,
-            )
-            if not st.session_state.visite1_imgs:
-                st.info("Aucune image trouvée")
-        if st.session_state.visite1_imgs:
-            st.write("Choisir une image pour Visite 1 :")
-            imgs = st.session_state.visite1_imgs
-            for i in range(0, len(imgs), 3):
-                row = imgs[i:i+3]
-                cols = st.columns(3)
-                for url, col in zip(row, cols):
-                    col.image(url, width=200)
-            st.radio(
-                "Sélection", list(range(1, len(imgs)+1)),
-                format_func=lambda i: f"Image {i}",
-                key="visite1_choice",
-                index=None,
-            )
-    with cimg2:
-        if st.button("Chercher images pour Visite 2"):
-            st.session_state.visite2_imgs = find_place_image_urls(
-                st.session_state.get("v2", "") or "",
-                city=address,
-                lang="fr",
-                limit=6,
-            )
-            if not st.session_state.visite2_imgs:
-                st.info("Aucune image trouvée")
-        if st.session_state.visite2_imgs:
-            st.write("Choisir une image pour Visite 2 :")
-            imgs = st.session_state.visite2_imgs
-            for i in range(0, len(imgs), 3):
-                row = imgs[i:i+3]
-                cols = st.columns(3)
-                for url, col in zip(row, cols):
-                    col.image(url, width=200)
-            st.radio(
-                "Sélection", list(range(1, len(imgs)+1)),
-                format_func=lambda i: f"Image {i}",
-                key="visite2_choice",
-                index=None,
-            )
+    visites_locked = st.session_state.get('visites_locked', False)
+    if visites_locked:
+        p1 = st.session_state.get('visite1_img_path', '')
+        p2 = st.session_state.get('visite2_img_path', '')
+        st.success(
+            f"✅ Images confirmées\n- Visite 1 : {os.path.basename(p1) if p1 else ''}\n- Visite 2 : {os.path.basename(p2) if p2 else ''}"
+        )
+        if st.button("Réinitialiser images"):
+            st.session_state.pop('visite1_img_path', None)
+            st.session_state.pop('visite2_img_path', None)
+            st.session_state['visites_locked'] = False
+            st.session_state.pop('visite1_imgs', None)
+            st.session_state.pop('visite2_imgs', None)
+            st.session_state.pop('visite1_choice', None)
+            st.session_state.pop('visite2_choice', None)
+            st.info("Images réinitialisées.")
+    else:
+        st.info("Sélectionnez 2 images puis cliquez sur Confirmer les images.")
+        cimg1, cimg2 = st.columns(2)
+        with cimg1:
+            if st.button("Chercher images pour Visite 1"):
+                st.session_state.visite1_imgs = find_place_image_urls(
+                    st.session_state.get("v1", "") or "",
+                    city=address,
+                    lang="fr",
+                    limit=6,
+                )
+                if not st.session_state.visite1_imgs:
+                    st.info("Aucune image trouvée")
+            if st.session_state.visite1_imgs:
+                st.write("Choisir une image pour Visite 1 :")
+                imgs = st.session_state.visite1_imgs
+                for i in range(0, len(imgs), 3):
+                    row = imgs[i:i+3]
+                    cols = st.columns(3)
+                    for url, col in zip(row, cols):
+                        col.image(url, width=200)
+                st.radio(
+                    "Sélection", list(range(1, len(imgs)+1)),
+                    format_func=lambda i: f"Image {i}",
+                    key="visite1_choice",
+                    index=None,
+                )
+        with cimg2:
+            if st.button("Chercher images pour Visite 2"):
+                st.session_state.visite2_imgs = find_place_image_urls(
+                    st.session_state.get("v2", "") or "",
+                    city=address,
+                    lang="fr",
+                    limit=6,
+                )
+                if not st.session_state.visite2_imgs:
+                    st.info("Aucune image trouvée")
+            if st.session_state.visite2_imgs:
+                st.write("Choisir une image pour Visite 2 :")
+                imgs = st.session_state.visite2_imgs
+                for i in range(0, len(imgs), 3):
+                    row = imgs[i:i+3]
+                    cols = st.columns(3)
+                    for url, col in zip(row, cols):
+                        col.image(url, width=200)
+                st.radio(
+                    "Sélection", list(range(1, len(imgs)+1)),
+                    format_func=lambda i: f"Image {i}",
+                    key="visite2_choice",
+                    index=None,
+                )
+        if st.button("Confirmer les images"):
+            urls1 = st.session_state.get('visite1_imgs') or []
+            urls2 = st.session_state.get('visite2_imgs') or []
+            choice1 = st.session_state.get('visite1_choice')
+            choice2 = st.session_state.get('visite2_choice')
+            if not (urls1 and choice1 and urls2 and choice2):
+                st.warning("Sélection incomplète…")
+            else:
+                idx1 = int(choice1) - 1
+                idx2 = int(choice2) - 1
+                if 0 <= idx1 < len(urls1) and 0 <= idx2 < len(urls2):
+                    try:
+                        path1 = _save_url_to_cache(urls1[idx1], IMG_CACHE_DIR)
+                        path2 = _save_url_to_cache(urls2[idx2], IMG_CACHE_DIR)
+                        st.session_state['visite1_img_path'] = path1
+                        st.session_state['visite2_img_path'] = path2
+                        st.session_state['visites_locked'] = True
+                        st.session_state['visite1_imgs'] = []
+                        st.session_state['visite2_imgs'] = []
+                        st.session_state.pop('visite1_choice', None)
+                        st.session_state.pop('visite2_choice', None)
+                        st.success("Images confirmées (2/2). Elles seront utilisées à la génération.")
+                    except Exception as e:
+                        st.warning(f"Erreur téléchargement: {e}")
+                else:
+                    st.warning("Sélection incomplète…")
     st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
 
     # Points forts & Challenges (Slide 5)
@@ -323,39 +387,14 @@ def render(config):
         "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",
     }
 
-    # Images for VISITE_1/2
+    # Images for VISITE_1/2 (from confirmed paths)
     image_by_shape = {}
-    tmp_files = []
-    def _download_to_tmp(url):
-        try:
-            r = requests.get(url, timeout=20)
-            r.raise_for_status()
-            fd, path = tempfile.mkstemp(suffix=".jpg"); os.close(fd)
-            with open(path, "wb") as f:
-                f.write(r.content)
-            tmp_files.append(path); return path
-        except Exception:
-            return None
-
-    # VISITE 1
-    urls1 = st.session_state.get("visite1_imgs") or []
-    choice1 = st.session_state.get("visite1_choice")
-    if urls1 and choice1:
-        idx = int(choice1) - 1
-        if 0 <= idx < len(urls1):
-            p1 = _download_to_tmp(urls1[idx])
-            if p1:
-                image_by_shape["VISITE_1_MASK"] = p1
-
-    # VISITE 2
-    urls2 = st.session_state.get("visite2_imgs") or []
-    choice2 = st.session_state.get("visite2_choice")
-    if urls2 and choice2:
-        idx = int(choice2) - 1
-        if 0 <= idx < len(urls2):
-            p2 = _download_to_tmp(urls2[idx])
-            if p2:
-                image_by_shape["VISITE_2_MASK"] = p2
+    p1 = st.session_state.get('visite1_img_path')
+    p2 = st.session_state.get('visite2_img_path')
+    if p1:
+        image_by_shape["VISITE_1_MASK"] = p1
+    if p2:
+        image_by_shape["VISITE_2_MASK"] = p2
 
     # ---- Generate Estimation ----
     st.subheader("Générer l'Estimation (PPTX)")
@@ -365,7 +404,7 @@ def render(config):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        print("image_by_shape:", image_by_shape)
+        print("DBG image_by_shape (locked):", image_by_shape)
         generate_estimation_pptx(est_tpl_path, pptx_out, mapping, image_by_shape=image_by_shape or None)
         st.success(f"OK: {pptx_out}")
         with open(pptx_out, "rb") as f:
