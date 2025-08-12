@@ -3,7 +3,11 @@ import os
 import tempfile
 from typing import Tuple
 
-from staticmap import StaticMap, CircleMarker, Line
+try:  # staticmap is an optional dependency
+    from staticmap import StaticMap, CircleMarker, Line
+except ImportError:  # pragma: no cover - handled at runtime
+    StaticMap = None  # type: ignore
+    CircleMarker = Line = None  # type: ignore
 
 EARTH_RADIUS = 6371000  # in meters
 
@@ -28,6 +32,8 @@ def build_static_map(lat: float, lon: float, radius_m: int = 300, size=(600, 600
     Génére un PNG OSM centré sur (lat, lon) avec un marqueur rouge et un cercle radius_m.
     Retourne le chemin du PNG temporaire.
     """
+    if StaticMap is None:  # dependency not installed
+        raise RuntimeError("staticmap package is required to build maps")
     m = StaticMap(size[0], size[1])
     m.add_marker(CircleMarker((lon, lat), "#ff0000", 12))
     circle_coords = _circle_coordinates(lat, lon, radius_m)
