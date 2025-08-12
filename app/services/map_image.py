@@ -3,8 +3,6 @@ import os
 import tempfile
 from typing import Tuple
 
-from staticmap import StaticMap, CircleMarker, Polygon
-
 
 def build_static_map(lat: float, lon: float, radius_m: int = 300, size: Tuple[int, int] = (600, 600)) -> str:
     """Generate a static map image centered on (lat, lon).
@@ -13,6 +11,13 @@ def build_static_map(lat: float, lon: float, radius_m: int = 300, size: Tuple[in
     translucent circle of `radius_m` metres around it. Returns the path to the
     generated temporary PNG file.
     """
+
+    try:
+        from staticmap import StaticMap, CircleMarker, Polygon
+    except ModuleNotFoundError as e:
+        raise RuntimeError(
+            "The 'staticmap' package is required to build map images. Install it with 'pip install staticmap'."
+        ) from e
 
     m = StaticMap(size[0], size[1])
     m.add_marker(CircleMarker((lon, lat), 'red', 12))
