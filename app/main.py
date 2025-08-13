@@ -18,8 +18,11 @@ import streamlit as st
 from app.views import estimation, mandat, book
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
-TPL_DIR = os.path.join(APP_ROOT, "templates")
-OUT_DIR = os.path.abspath(os.path.join(APP_ROOT, "..", "output"))
+# Templates are stored at the project root so they can easily be bundled with
+# PyInstaller.  Use ``BASE_DIR`` (the repository root) to resolve the path
+# rather than ``APP_ROOT``.
+TPL_DIR = os.path.join(BASE_DIR, "templates")
+OUT_DIR = os.path.join(BASE_DIR, "output")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ---- Multi-template directories ----
