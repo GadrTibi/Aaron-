@@ -16,10 +16,10 @@ if BASE_DIR not in sys.path:
 import streamlit as st
 
 from app.views import estimation, mandat, book
+from run_app import resource_path
 
-APP_ROOT = os.path.dirname(os.path.abspath(__file__))
-TPL_DIR = os.path.join(APP_ROOT, "templates")
-OUT_DIR = os.path.abspath(os.path.join(APP_ROOT, "..", "output"))
+TPL_DIR = resource_path("templates")
+OUT_DIR = resource_path("output")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ---- Multi-template directories ----
