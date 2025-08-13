@@ -22,7 +22,7 @@ def render(config):
     TPL_DIR = config['TPL_DIR']
     EST_TPL_DIR = config['EST_TPL_DIR']
     OUT_DIR = config['OUT_DIR']
-    IMG_CACHE_DIR = os.path.join(OUT_DIR, "_images_cache")
+    IMG_CACHE_DIR = config['IMG_CACHE_DIR']
 
     if "visites_locked" not in st.session_state:
         st.session_state['visites_locked'] = False

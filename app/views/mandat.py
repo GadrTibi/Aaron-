@@ -8,13 +8,13 @@ from .utils import _sanitize_filename, list_templates
 
 def render(config):
     TPL_DIR = config["TPL_DIR"]
-    MAN_TPL_DIR = config["MAN_TPL_DIR"]
+    MANDAT_TPL_DIR = config["MANDAT_TPL_DIR"]
     OUT_DIR = config["OUT_DIR"]
 
     # ---- Templates Mandat (DOCX) ----
     st.subheader("Templates Mandat (DOCX)")
-    st.caption(f"Dossier : {MAN_TPL_DIR}")
-    man_list = list_templates(MAN_TPL_DIR, "docx")
+    st.caption(f"Dossier : {MANDAT_TPL_DIR}")
+    man_list = list_templates(MANDAT_TPL_DIR, "docx")
     uploaded_docx = st.file_uploader(
         "Ajouter des templates DOCX", type=["docx"], accept_multiple_files=True, key="up_man"
     )
@@ -22,18 +22,18 @@ def render(config):
         saved = 0
         for up in uploaded_docx:
             safe_name = _sanitize_filename(up.name, "docx")
-            dst = os.path.join(MAN_TPL_DIR, safe_name)
+            dst = os.path.join(MANDAT_TPL_DIR, safe_name)
             if os.path.exists(dst):
                 base, ext = os.path.splitext(safe_name)
                 i = 2
-                while os.path.exists(os.path.join(MAN_TPL_DIR, f"{base} ({i}){ext}")):
+                while os.path.exists(os.path.join(MANDAT_TPL_DIR, f"{base} ({i}){ext}")):
                     i += 1
-                dst = os.path.join(MAN_TPL_DIR, f"{base} ({i}){ext}")
+                dst = os.path.join(MANDAT_TPL_DIR, f"{base} ({i}){ext}")
             with open(dst, "wb") as f:
                 f.write(up.getbuffer())
             saved += 1
         st.success(f"{saved} template(s) ajouté(s).")
-        man_list = list_templates(MAN_TPL_DIR, "docx")
+        man_list = list_templates(MANDAT_TPL_DIR, "docx")
     legacy_man = os.path.join(TPL_DIR, "mandat_template.docx")
     has_legacy_man = os.path.exists(legacy_man)
     options = (["mandat_template.docx (héritage)"] if has_legacy_man else []) + man_list
@@ -44,7 +44,7 @@ def render(config):
             return None
         if label == "mandat_template.docx (héritage)":
             return legacy_man
-        return os.path.join(MAN_TPL_DIR, label)
+        return os.path.join(MANDAT_TPL_DIR, label)
 
     # ---- UI Mandat sans redondance ----
     st.subheader("Mandat (DOCX)")
