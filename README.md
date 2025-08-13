@@ -1,8 +1,4 @@
-# MFY Local App (v2)
-
-- Quartier : auto‑remplissage via boutons (Transports / Incontournables / Spots / Visites).
-- Adresses du quartier — listes longues & sélection.
-- Remplacement PPTX respectant **exactement** la mise en forme des tokens (même multi-runs).
-- Recalcul revenus **en temps réel** (plus d'Excel).
-
-Voir `app/main.py` pour les commentaires d'usage et `templates/*` pour déposer vos maquettes.
+# Build & Run
+- Windows : `powershell -ExecutionPolicy Bypass -File build_win.ps1`
+- macOS : `zsh build_mac.sh`
+- Lancer depuis `dist/mfy_app` (définir MFY_PORT si besoin puis exécuter l'exe ou ouvrir l'app)
