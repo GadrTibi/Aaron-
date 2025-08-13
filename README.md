@@ -17,6 +17,7 @@ Remove-Item -Recurse -Force build, dist, mfy_app.spec
 
 # Create the executable
 pyinstaller --noconfirm --clean --collect-all streamlit `
+  --add-data "app;app" `
   --add-data "templates;templates" `
   --add-data "output;output" `
   --name mfy_app run_app.py
