@@ -1,4 +1,4 @@
-# Environnements Python
+# --- Environnements / caches ---
 .venv/
 env/
 venv/
@@ -8,39 +8,32 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+.cache/
+*.DS_Store
+.streamlit/
 
-# Logs et fichiers temporaires
+# --- Build / distribution ---
+build/
+dist/
+*.spec
+
+# --- Logs / temporaires ---
 *.log
 *.tmp
 *.temp
+Thumbs.db
+*.lock
 
-# Cache
-.cache/
-*.DS_Store
+# --- Sorties générées ---
+output/**
+!output/.gitkeep
 
-# Sorties Streamlit
-.streamlit/
+# --- Images téléchargées ---
+app/static/images/**
+!app/static/images/.gitkeep
 
-# Données de sortie / générées
-output/
-*.pdf
-*.pptx
-*.docx
-*.xlsx
+# --- Templates (non versionnés) ---
+app/templates/**
 
-# Templates (non versionnés)
-app/templates/estimation/
-app/templates/mandat/
-app/templates/book/
-
-# Images téléchargées
-app/static/images/
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.svg
-
-# Config locale
-*.env
-.env.*
+# --- Fichiers de lock Office ---
+~$*
