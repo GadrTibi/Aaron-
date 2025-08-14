@@ -82,3 +82,7 @@ elif page == "Mandat":
 elif page == "Book":
     book.render(CONFIG)
 
+st.sidebar.markdown("---")
+if st.sidebar.button("Quitter l'application"):
+    os._exit(0)
+
