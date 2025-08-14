@@ -38,8 +38,8 @@ CONFIG = {
 }
 
 # ---- Ensure directories exist ----
-for _d in CONFIG.values():
-    os.makedirs(_d, exist_ok=True)
+for k in ("TPL_DIR", "EST_TPL_DIR", "BOOK_TPL_DIR", "MANDAT_TPL_DIR", "OUT_DIR", "IMG_CACHE_DIR"):
+    os.makedirs(CONFIG[k], exist_ok=True)
 
 # ---------------- App UI -----------------
 st.set_page_config(page_title="MFY - Estimation & Mandat (local)", layout="wide")
