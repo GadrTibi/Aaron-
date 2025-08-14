@@ -26,11 +26,6 @@ def main():
         f"--server.port={port}",
     ]
 
-    try:
-        webbrowser.open_new_tab(f"http://localhost:{port}")
-    except Exception:
-        pass
-
     st_main()
 
 if __name__ == "__main__":
