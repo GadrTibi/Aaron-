@@ -11,7 +11,8 @@ from app.services.book_pdf import build_book_pdf
 from app.services.book_tokens import build_book_mapping
 from app.services.geocode import geocode_address
 from app.services.map_image import build_static_map
-from app.services.poi import fetch_transports, list_metro_lines, list_bus_lines
+from app.services.poi import list_metro_lines, list_bus_lines
+from app.services.poi_fetcher import POIService
 from app.services.pptx_fill import generate_book_pptx
 
 from .utils import _sanitize_filename, list_templates
@@ -82,13 +83,17 @@ def render(config: dict) -> None:
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                radius = st.session_state.get("radius_m", 1200)
-                tr = fetch_transports(lat, lon, radius_m=radius)
-                metro = list_metro_lines(lat, lon, radius_m=radius)
-                bus = list_bus_lines(lat, lon, radius_m=radius)
-                st.session_state["q_tx"] = tr.get("taxi", "")
-                st.session_state["metro_lines_auto"] = metro
-                st.session_state["bus_lines_auto"] = bus
+                radius = int(st.session_state.get("radius_m", 1200))
+                items = _poi_service.get_pois(lat, lon, radius_m=radius, category="transport", lang="fr")
+                result = _poi_service.last_result
+                st.session_state["book_transport_result"] = {
+                    "items": items,
+                    "provider": result.provider if result else "",
+                }
+                summary = _format_transport_summary(items)
+                st.session_state["q_tx"] = summary.get("taxi", "")
+                st.session_state["metro_lines_auto"] = list_metro_lines(lat, lon, radius_m=radius)
+                st.session_state["bus_lines_auto"] = list_bus_lines(lat, lon, radius_m=radius)
             except Exception as e:
                 st.warning(f"Transports non chargés: {e}")
         else:
@@ -104,6 +109,16 @@ def render(config: dict) -> None:
     st.write(f"Taxi : {taxi_txt or '—'}")
     st.write(f"Métro : {metro_refs or '—'}")
     st.write(f"Bus : {bus_refs or '—'}")
+
+    transport_result = st.session_state.get("book_transport_result", {})
+    transport_items = transport_result.get("items", [])
+    if transport_items:
+        st.caption(f"source : {transport_result.get('provider', 'overpass')}")
+        for item in transport_items[:5]:
+            st.markdown(f"- {_poi_label(item)}")
+    elif transport_result:
+        st.caption(f"source : {transport_result.get('provider', 'overpass')}")
+        _render_zero_state("book_transport")
 
     # ---- Instructions (Slide 5) ----
     st.subheader("Instructions (Slide 5)")
@@ -195,4 +210,57 @@ def render(config: dict) -> None:
             st.success(f"OK: {pdf_out}")
             with open(pdf_out, "rb") as f:
                 st.download_button("Télécharger le PDF", data=f.read(), file_name=os.path.basename(pdf_out))
+
+_poi_service = POIService()
+
+
+def _poi_label(item: dict) -> str:
+    name = item.get("name")
+    tags = item.get("tags") or {}
+    if not name:
+        for key in ("ref", "tourism", "amenity", "historic", "leisure", "public_transport", "railway"):
+            value = tags.get(key)
+            if value:
+                name = value
+                break
+    name = name or f"POI {item.get('id', '')}".strip()
+    distance = item.get("distance")
+    if isinstance(distance, (int, float)):
+        mins = int(round(float(distance) / 80.0)) if distance else 0
+        return f"{name} ({int(distance)} m · {mins} min)"
+    return str(name)
+
+
+def _format_transport_summary(items: list[dict]) -> dict[str, str]:
+    summary = {"taxi": "", "metro": "", "bus": ""}
+    for item in items:
+        tags = item.get("tags") or {}
+        label = _poi_label(item)
+        if tags.get("amenity") == "taxi" and not summary["taxi"]:
+            summary["taxi"] = label
+        elif tags.get("railway") in {"station", "tram_stop", "subway", "halt"} and not summary["metro"]:
+            summary["metro"] = label
+        elif tags.get("highway") == "bus_stop" and not summary["bus"]:
+            summary["bus"] = label
+        elif tags.get("public_transport") and not summary["metro"]:
+            summary["metro"] = label
+    return summary
+
+
+def _render_zero_state(prefix: str) -> None:
+    st.info("Aucun résultat pour ce périmètre. Essayez d’augmenter le rayon.")
+    options = [800, 1500, 3000]
+    current_radius = int(st.session_state.get("radius_m", 1200))
+    if current_radius not in options:
+        options.append(current_radius)
+    options = sorted(set(options))
+    index = options.index(current_radius) if current_radius in options else 0
+    choice = st.selectbox(
+        "Rayon suggéré",
+        options=options,
+        index=index,
+        key=f"{prefix}_radius_select",
+    )
+    if choice != current_radius:
+        st.session_state["radius_m"] = choice
 

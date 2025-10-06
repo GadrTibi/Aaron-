@@ -5,18 +5,110 @@ from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.plots import build_estimation_histo
 from app.services.pptx_fill import generate_estimation_pptx
 from app.services.poi import (
-    fetch_transports,
-    list_incontournables,
-    list_spots,
-    list_visites,
     list_metro_lines,
     list_bus_lines,
 )
+from app.services.poi_fetcher import POIService
 from app.services.geocode import geocode_address
 from app.services.image_fetcher import debug_fetch_poi
 from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
+
+
+_poi_service = POIService()
+
+
+def _poi_name(item: dict) -> str:
+    tags = item.get("tags") or {}
+    name = item.get("name")
+    if name:
+        return str(name)
+    for key in ("ref", "tourism", "amenity", "historic", "leisure", "public_transport", "railway"):
+        value = tags.get(key)
+        if value:
+            return str(value)
+    return f"POI {item.get('id', '')}".strip()
+
+
+def _poi_label(item: dict) -> str:
+    name = _poi_name(item)
+    distance = item.get("distance")
+    if distance:
+        mins = int(round(float(distance) / 80.0)) if distance else 0
+        return f"{name} ({int(distance)} m · {mins} min)"
+    return name
+
+
+def _store_poi_result(category: str, result: dict) -> None:
+    st.session_state[f"{category}_poi_result"] = result
+
+
+def _get_poi_result(category: str) -> dict:
+    return st.session_state.get(f"{category}_poi_result", {})
+
+
+def _render_zero_state(category: str) -> None:
+    st.info("Aucun résultat pour ce périmètre. Essayez d’augmenter le rayon.")
+    radius_options = [800, 1500, 3000]
+    current_radius = int(st.session_state.get("radius_m", 1200))
+    if current_radius not in radius_options:
+        radius_options.append(current_radius)
+    radius_options = sorted(set(radius_options))
+    default_index = radius_options.index(current_radius) if current_radius in radius_options else 0
+    new_radius = st.selectbox(
+        "Rayon suggéré",
+        options=radius_options,
+        index=default_index,
+        key=f"{category}_radius_select",
+    )
+    if new_radius != current_radius:
+        st.session_state["radius_m"] = new_radius
+
+
+def _format_transport_summary(items: list[dict]) -> dict[str, str]:
+    summary = {"taxi": "", "metro": "", "bus": ""}
+    for item in items:
+        tags = item.get("tags") or {}
+        label = _poi_label(item)
+        if tags.get("amenity") == "taxi" and not summary["taxi"]:
+            summary["taxi"] = label
+        elif tags.get("railway") in {"station", "tram_stop", "subway", "halt"} and not summary["metro"]:
+            summary["metro"] = label
+        elif tags.get("highway") == "bus_stop" and not summary["bus"]:
+            summary["bus"] = label
+        elif tags.get("public_transport") and not summary["metro"]:
+            summary["metro"] = label
+    return summary
+
+
+def _default_indices(items: list[dict], stored: list[str], limit: int) -> list[int]:
+    name_to_index: dict[str, int] = {}
+    for idx, item in enumerate(items):
+        name_to_index.setdefault(_poi_name(item), idx)
+    indices: list[int] = []
+    for value in stored:
+        if value:
+            idx = name_to_index.get(value)
+            if idx is not None:
+                indices.append(idx)
+    if not indices:
+        indices = list(range(min(len(items), limit)))
+    return indices[:limit]
+
+
+def _fetch_and_store_pois(category: str, lat: float, lon: float, radius: int, lang: str = "fr") -> None:
+    with st.spinner("Recherche de points d'intérêt…"):
+        items = _poi_service.get_pois(lat, lon, radius_m=radius, category=category, lang=lang)
+    last = _poi_service.last_result
+    result = {
+        "items": items,
+        "provider": last.provider if last else "",
+        "endpoint": last.endpoint if last else None,
+        "status": last.status if last else None,
+        "duration_ms": last.duration_ms if last else None,
+    }
+    _store_poi_result(category, result)
 
 
 def _resolve_base_nightly_price() -> float:
@@ -104,13 +196,13 @@ def render(config):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                radius = st.session_state.get("radius_m", 1200)
-                tr = fetch_transports(lat, lon, radius_m=radius)
-                metro = list_metro_lines(lat, lon, radius_m=radius)
-                bus = list_bus_lines(lat, lon, radius_m=radius)
-                st.session_state["q_tx"] = tr.get("taxi", "")
-                st.session_state['metro_lines_auto'] = metro
-                st.session_state['bus_lines_auto'] = bus
+                radius = int(st.session_state.get("radius_m", 1200))
+                _fetch_and_store_pois("transport", lat, lon, radius)
+                transport_items = _get_poi_result("transport").get("items", [])
+                summary = _format_transport_summary(transport_items)
+                st.session_state["q_tx"] = summary.get("taxi", "")
+                st.session_state['metro_lines_auto'] = list_metro_lines(lat, lon, radius_m=radius)
+                st.session_state['bus_lines_auto'] = list_bus_lines(lat, lon, radius_m=radius)
             except Exception as e:
                 st.warning(f"Transports non chargés: {e}")
         else:
@@ -126,70 +218,111 @@ def render(config):
     st.write(f"Métro : {metro_refs or '—'}")
     st.write(f"Bus : {bus_refs or '—'}")
 
+    transport_result = _get_poi_result("transport")
+    transport_items = transport_result.get("items", [])
+    if transport_items:
+        st.caption(f"source : {transport_result.get('provider', 'overpass')}")
+        for item in transport_items[:5]:
+            st.markdown(f"- {_poi_label(item)}")
+    elif transport_result:
+        st.caption(f"source : {transport_result.get('provider', 'overpass')}")
+        _render_zero_state("transport")
+
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
     if st.button("Charger Incontournables (≈15)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                st.session_state['incontournables_list'] = list_incontournables(
-                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
-                )
+                radius = int(st.session_state.get("radius_m", 1200))
+                _fetch_and_store_pois("incontournables", lat, lon, radius)
             except Exception as e:
                 st.warning(f"Incontournables non chargés: {e}")
-    inco_list = st.session_state.get('incontournables_list', [])
-    default_inco = [x for x in [st.session_state.get('i1'), st.session_state.get('i2'), st.session_state.get('i3')] if x]
-    sel_inco = st.multiselect(
-        "Incontournables (max 3)",
-        options=inco_list,
-        default=default_inco or inco_list[:3]
-    )
-    sel_inco = sel_inco[:3]
-    st.session_state['i1'] = sel_inco[0] if len(sel_inco) > 0 else ""
-    st.session_state['i2'] = sel_inco[1] if len(sel_inco) > 1 else ""
-    st.session_state['i3'] = sel_inco[2] if len(sel_inco) > 2 else ""
+    inco_result = _get_poi_result("incontournables")
+    inco_items = inco_result.get("items", [])
+    if inco_items:
+        labels = [_poi_label(item) for item in inco_items]
+        stored = [st.session_state.get('i1', ''), st.session_state.get('i2', ''), st.session_state.get('i3', '')]
+        defaults = _default_indices(inco_items, stored, 3)
+        selection = st.multiselect(
+            "Incontournables (max 3)",
+            options=list(range(len(inco_items))),
+            default=defaults,
+            format_func=lambda idx: labels[idx],
+        )
+        selection = selection[:3]
+        names = [_poi_name(inco_items[idx]) for idx in selection]
+        st.session_state['i1'] = names[0] if len(names) > 0 else ""
+        st.session_state['i2'] = names[1] if len(names) > 1 else ""
+        st.session_state['i3'] = names[2] if len(names) > 2 else ""
+        st.caption(f"source : {inco_result.get('provider', 'overpass')}")
+    elif inco_result:
+        st.caption(f"source : {inco_result.get('provider', 'overpass')}")
+        _render_zero_state("incontournables")
 
     if st.button("Charger Spots (≈10)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                st.session_state['spots_list'] = list_spots(
-                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
-                )
+                radius = int(st.session_state.get("radius_m", 1200))
+                _fetch_and_store_pois("spots", lat, lon, radius)
             except Exception as e:
                 st.warning(f"Spots non chargés: {e}")
-    spots_list = st.session_state.get('spots_list', [])
-    default_spots = [x for x in [st.session_state.get('s1'), st.session_state.get('s2')] if x]
-    sel_spots = st.multiselect(
-        "Spots (max 2)",
-        options=spots_list,
-        default=default_spots or spots_list[:2]
-    )
-    sel_spots = sel_spots[:2]
-    st.session_state['s1'] = sel_spots[0] if len(sel_spots) > 0 else ""
-    st.session_state['s2'] = sel_spots[1] if len(sel_spots) > 1 else ""
+    spots_result = _get_poi_result("spots")
+    spots_items = spots_result.get("items", [])
+    if spots_items:
+        labels = [_poi_label(item) for item in spots_items]
+        stored = [st.session_state.get('s1', ''), st.session_state.get('s2', '')]
+        defaults = _default_indices(spots_items, stored, 2)
+        selection = st.multiselect(
+            "Spots (max 2)",
+            options=list(range(len(spots_items))),
+            default=defaults,
+            format_func=lambda idx: labels[idx],
+        )
+        selection = selection[:2]
+        names = [_poi_name(spots_items[idx]) for idx in selection]
+        st.session_state['s1'] = names[0] if len(names) > 0 else ""
+        st.session_state['s2'] = names[1] if len(names) > 1 else ""
+        st.caption(f"source : {spots_result.get('provider', 'overpass')}")
+    elif spots_result:
+        st.caption(f"source : {spots_result.get('provider', 'overpass')}")
+        _render_zero_state("spots")
 
     st.markdown("**Lieux à visiter (2) — images auto (Unsplash → Pexels → Wikimedia)**")
     if st.button("Charger Visites (≈10)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                st.session_state['visites_list'] = list_visites(
-                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
-                )
+                radius = int(st.session_state.get("radius_m", 1200))
+                _fetch_and_store_pois("lieux_a_visiter", lat, lon, radius)
             except Exception as e:
                 st.warning(f"Visites non chargées: {e}")
-    vis_list = st.session_state.get('visites_list', [])
-    default_vis = [x for x in [st.session_state.get('v1'), st.session_state.get('v2')] if x]
-    sel_vis = st.multiselect(
-        "Lieux à visiter (max 2)",
-        options=vis_list,
-        default=default_vis or vis_list[:2]
-    )
-    sel_vis = sel_vis[:2]
+    visites_result = _get_poi_result("lieux_a_visiter")
+    visites_items = visites_result.get("items", [])
+    if visites_items:
+        labels = [_poi_label(item) for item in visites_items]
+        stored = [st.session_state.get('v1', ''), st.session_state.get('v2', '')]
+        defaults = _default_indices(visites_items, stored, 2)
+        sel_vis = st.multiselect(
+            "Lieux à visiter (max 2)",
+            options=list(range(len(visites_items))),
+            default=defaults,
+            format_func=lambda idx: labels[idx],
+        )
+        sel_vis = sel_vis[:2]
+        names = [_poi_name(visites_items[idx]) for idx in sel_vis]
+    else:
+        sel_vis = []
+        names = []
+        if visites_result:
+            st.caption(f"source : {visites_result.get('provider', 'overpass')}")
+            _render_zero_state("lieux_a_visiter")
+    if visites_items:
+        st.caption(f"source : {visites_result.get('provider', 'overpass')}")
     prev_v1, prev_v2 = st.session_state.get('v1', ''), st.session_state.get('v2', '')
-    new_v1 = sel_vis[0] if len(sel_vis) > 0 else ""
-    new_v2 = sel_vis[1] if len(sel_vis) > 1 else ""
+    new_v1 = names[0] if len(names) > 0 else ""
+    new_v2 = names[1] if len(names) > 1 else ""
     if new_v1 != prev_v1:
         st.session_state.pop('visite1_data', None)
     if new_v2 != prev_v2:
