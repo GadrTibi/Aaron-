@@ -2,6 +2,7 @@ import os
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
+from app.services.plots import build_estimation_histo
 from app.services.pptx_fill import generate_estimation_pptx
 from app.services.poi import (
     fetch_transports,
@@ -17,6 +18,26 @@ from app.services.image_cache import save_url_to_cache
 from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
+
+
+def _resolve_base_nightly_price() -> float:
+    keys = [
+        "base_nightly_price",
+        "price_per_night",
+        "base_price",
+        "price_base",
+        "rn_prix",
+    ]
+    for key in keys:
+        if key in st.session_state:
+            raw = st.session_state.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                continue
+    raise ValueError("Paramètre 'base_nightly_price' introuvable dans l'état de l'application.")
 
 def render(config):
     TPL_DIR = config['TPL_DIR']
@@ -336,6 +357,43 @@ def render(config):
     PRIX_CIBLE = prix_nuitee * coef_cible
     PRIX_OPT = prix_nuitee * coef_opt
 
+    st.markdown("**Évo du prix/nuitée**")
+    histo_col_btn, histo_col_preview = st.columns([1, 3])
+    histo_error = None
+    try:
+        base_price_value = _resolve_base_nightly_price()
+    except ValueError as exc:
+        base_price_value = None
+        histo_error = str(exc)
+
+    with histo_col_btn:
+        regen_clicked = st.button(
+            "(Re)générer graphique",
+            key="regen_estimation_histo",
+            disabled=base_price_value is None,
+        )
+        if histo_error:
+            st.error(histo_error)
+        if regen_clicked and base_price_value is not None:
+            try:
+                plot_path = build_estimation_histo(base_price_value)
+                st.session_state["estimation_histo_png"] = plot_path
+                st.success("Graphique mis à jour.")
+            except Exception as exc:
+                st.error(f"Échec de la génération du graphique: {exc}")
+
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    default_plot_path = os.path.join(base_dir, "out", "plots", "estimation_histo.png")
+    preview_path = st.session_state.get("estimation_histo_png", default_plot_path)
+    if not preview_path or not os.path.exists(preview_path):
+        preview_path = None
+
+    with histo_col_preview:
+        if preview_path:
+            st.image(preview_path, caption="Évo du prix/nuitée")
+        elif not histo_error:
+            st.caption("Graphique non généré pour le moment.")
+
     # Mapping Estimation
     metro = st.session_state.get('metro_lines_auto') or []
     bus = st.session_state.get('bus_lines_auto') or []
@@ -405,8 +463,25 @@ def render(config):
         if not est_tpl_path or not os.path.exists(est_tpl_path):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
+        try:
+            base_price_value = _resolve_base_nightly_price()
+        except ValueError as exc:
+            st.error(f"Impossible de générer le graphique: {exc}")
+            st.stop()
+        try:
+            histo_path = build_estimation_histo(base_price_value)
+            st.session_state["estimation_histo_png"] = histo_path
+        except Exception as exc:
+            st.error(f"Graphique estimation indisponible: {exc}")
+            st.stop()
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        generate_estimation_pptx(est_tpl_path, pptx_out, mapping, image_by_shape=image_by_shape or None)
+        generate_estimation_pptx(
+            est_tpl_path,
+            pptx_out,
+            mapping,
+            chart_image=histo_path,
+            image_by_shape=image_by_shape or None,
+        )
         st.success(f"OK: {pptx_out}")
         with open(pptx_out, "rb") as f:
             st.download_button("Télécharger le PPTX", data=f.read(), file_name=os.path.basename(pptx_out))
