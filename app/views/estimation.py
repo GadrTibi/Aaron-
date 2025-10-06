@@ -13,8 +13,7 @@ from app.services.poi import (
     list_bus_lines,
 )
 from app.services.geocode import geocode_address
-from app.services.image_search import find_place_image_urls
-from app.services.image_cache import save_url_to_cache
+from app.services.image_fetcher import debug_fetch_poi
 from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
@@ -43,7 +42,6 @@ def render(config):
     TPL_DIR = config['TPL_DIR']
     EST_TPL_DIR = config['EST_TPL_DIR']
     OUT_DIR = config['OUT_DIR']
-    IMG_CACHE_DIR = config['IMG_CACHE_DIR']
 
     if "visites_locked" not in st.session_state:
         st.session_state['visites_locked'] = False
@@ -171,7 +169,7 @@ def render(config):
     st.session_state['s1'] = sel_spots[0] if len(sel_spots) > 0 else ""
     st.session_state['s2'] = sel_spots[1] if len(sel_spots) > 1 else ""
 
-    st.markdown("**Lieux à visiter (2) — images auto (Wikipedia/Commons)**")
+    st.markdown("**Lieux à visiter (2) — images auto (Unsplash → Pexels → Wikimedia)**")
     if st.button("Charger Visites (≈10)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
@@ -193,114 +191,123 @@ def render(config):
     new_v1 = sel_vis[0] if len(sel_vis) > 0 else ""
     new_v2 = sel_vis[1] if len(sel_vis) > 1 else ""
     if new_v1 != prev_v1:
-        st.session_state['visite1_imgs'] = []
-        st.session_state.pop('visite1_choice', None)
+        st.session_state.pop('visite1_data', None)
     if new_v2 != prev_v2:
-        st.session_state['visite2_imgs'] = []
-        st.session_state.pop('visite2_choice', None)
+        st.session_state.pop('visite2_data', None)
     st.session_state['v1'] = new_v1
     st.session_state['v2'] = new_v2
 
-    if "visite1_imgs" not in st.session_state:
-        st.session_state.visite1_imgs = []
-    if "visite2_imgs" not in st.session_state:
-        st.session_state.visite2_imgs = []
+    if "visite1_data" not in st.session_state:
+        st.session_state['visite1_data'] = None
+    if "visite2_data" not in st.session_state:
+        st.session_state['visite2_data'] = None
 
     address = st.session_state.get("bien_addr", "")
+    country = st.session_state.get("bien_country") or st.session_state.get("bien_pays")
 
     visites_locked = st.session_state.get('visites_locked', False)
     if visites_locked:
         p1 = st.session_state.get('visite1_img_path', '')
         p2 = st.session_state.get('visite2_img_path', '')
+        prov1 = st.session_state.get('visite1_provider') or "Placeholder"
+        prov2 = st.session_state.get('visite2_provider') or "Placeholder"
         st.success(
-            f"✅ Images confirmées\n- Visite 1 : {os.path.basename(p1) if p1 else ''}\n- Visite 2 : {os.path.basename(p2) if p2 else ''}"
+            "✅ Images confirmées\n"
+            f"- Visite 1 : {os.path.basename(p1) if p1 else ''} (source : {prov1})\n"
+            f"- Visite 2 : {os.path.basename(p2) if p2 else ''} (source : {prov2})"
         )
         if st.button("Réinitialiser images"):
             st.session_state.pop('visite1_img_path', None)
             st.session_state.pop('visite2_img_path', None)
             st.session_state['visites_locked'] = False
-            st.session_state.pop('visite1_imgs', None)
-            st.session_state.pop('visite2_imgs', None)
-            st.session_state.pop('visite1_choice', None)
-            st.session_state.pop('visite2_choice', None)
+            st.session_state.pop('visite1_data', None)
+            st.session_state.pop('visite2_data', None)
+            st.session_state.pop('visite1_provider', None)
+            st.session_state.pop('visite2_provider', None)
             st.info("Images réinitialisées.")
     else:
-        st.info("Sélectionnez 2 images puis cliquez sur Confirmer les images.")
+        st.info("Cliquez sur « Chercher image » pour chaque visite, puis confirmez.")
         cimg1, cimg2 = st.columns(2)
+
+        def _store_image(slot: str, poi_label: str) -> None:
+            if not poi_label:
+                st.warning("Sélectionnez d'abord un lieu dans la liste.")
+                return
+            with st.spinner("Recherche d'image…"):
+                final_path, attempts = debug_fetch_poi(poi_label, city=address or None, country=country)
+            final_attempt = next((a for a in reversed(attempts) if a.local_path), None)
+            provider = final_attempt.provider if final_attempt else ""
+            st.session_state[f"{slot}_data"] = {
+                "path": final_path,
+                "provider": provider,
+                "attempts": [
+                    {
+                        "provider": a.provider,
+                        "request_url": a.request_url,
+                        "status": a.status,
+                        "message": a.message,
+                        "image_url": a.image_url,
+                        "local_path": a.local_path,
+                        "duration_ms": a.duration_ms,
+                    }
+                    for a in attempts
+                ],
+            }
+
         with cimg1:
-            if st.button("Chercher images pour Visite 1"):
-                st.session_state.visite1_imgs = find_place_image_urls(
-                    st.session_state.get("v1", "") or "",
-                    city=address,
-                    lang="fr",
-                    limit=6,
-                )
-                if not st.session_state.visite1_imgs:
-                    st.info("Aucune image trouvée")
-            if st.session_state.visite1_imgs:
-                st.write("Choisir une image pour Visite 1 :")
-                imgs = st.session_state.visite1_imgs
-                for i in range(0, len(imgs), 3):
-                    row = imgs[i:i+3]
-                    cols = st.columns(3)
-                    for url, col in zip(row, cols):
-                        col.image(url, width=200)
-                st.radio(
-                    "Sélection", list(range(1, len(imgs)+1)),
-                    format_func=lambda i: f"Image {i}",
-                    key="visite1_choice",
-                    index=None,
-                )
+            if st.button("Chercher image pour Visite 1", key="fetch_visite1"):
+                _store_image("visite1", st.session_state.get("v1", ""))
+            data1 = st.session_state.get('visite1_data') or {}
+            path1 = data1.get("path")
+            if path1:
+                st.image(path1, width=280)
+                provider = data1.get("provider")
+                if provider and provider != "placeholder":
+                    st.caption(f"Source : {provider}")
+                else:
+                    st.caption("Source : Placeholder")
+            attempts1 = data1.get("attempts") or []
+            if attempts1:
+                provider_msgs = [
+                    f"{item['provider']} ({item['status']})"
+                    for item in attempts1
+                ]
+                st.caption(" • ".join(provider_msgs))
         with cimg2:
-            if st.button("Chercher images pour Visite 2"):
-                st.session_state.visite2_imgs = find_place_image_urls(
-                    st.session_state.get("v2", "") or "",
-                    city=address,
-                    lang="fr",
-                    limit=6,
-                )
-                if not st.session_state.visite2_imgs:
-                    st.info("Aucune image trouvée")
-            if st.session_state.visite2_imgs:
-                st.write("Choisir une image pour Visite 2 :")
-                imgs = st.session_state.visite2_imgs
-                for i in range(0, len(imgs), 3):
-                    row = imgs[i:i+3]
-                    cols = st.columns(3)
-                    for url, col in zip(row, cols):
-                        col.image(url, width=200)
-                st.radio(
-                    "Sélection", list(range(1, len(imgs)+1)),
-                    format_func=lambda i: f"Image {i}",
-                    key="visite2_choice",
-                    index=None,
-                )
+            if st.button("Chercher image pour Visite 2", key="fetch_visite2"):
+                _store_image("visite2", st.session_state.get("v2", ""))
+            data2 = st.session_state.get('visite2_data') or {}
+            path2 = data2.get("path")
+            if path2:
+                st.image(path2, width=280)
+                provider = data2.get("provider")
+                if provider and provider != "placeholder":
+                    st.caption(f"Source : {provider}")
+                else:
+                    st.caption("Source : Placeholder")
+            attempts2 = data2.get("attempts") or []
+            if attempts2:
+                provider_msgs = [
+                    f"{item['provider']} ({item['status']})"
+                    for item in attempts2
+                ]
+                st.caption(" • ".join(provider_msgs))
         if st.button("Confirmer les images"):
-            urls1 = st.session_state.get('visite1_imgs') or []
-            urls2 = st.session_state.get('visite2_imgs') or []
-            choice1 = st.session_state.get('visite1_choice')
-            choice2 = st.session_state.get('visite2_choice')
-            if not (urls1 and choice1 and urls2 and choice2):
+            data1 = st.session_state.get('visite1_data') or {}
+            data2 = st.session_state.get('visite2_data') or {}
+            path1 = data1.get("path")
+            path2 = data2.get("path")
+            if not (path1 and path2):
                 st.warning("Sélection incomplète…")
             else:
-                idx1 = int(choice1) - 1
-                idx2 = int(choice2) - 1
-                if 0 <= idx1 < len(urls1) and 0 <= idx2 < len(urls2):
-                    try:
-                        path1 = save_url_to_cache(urls1[idx1], IMG_CACHE_DIR)
-                        path2 = save_url_to_cache(urls2[idx2], IMG_CACHE_DIR)
-                        st.session_state['visite1_img_path'] = path1
-                        st.session_state['visite2_img_path'] = path2
-                        st.session_state['visites_locked'] = True
-                        st.session_state['visite1_imgs'] = []
-                        st.session_state['visite2_imgs'] = []
-                        st.session_state.pop('visite1_choice', None)
-                        st.session_state.pop('visite2_choice', None)
-                        st.success("Images confirmées (2/2). Elles seront utilisées à la génération.")
-                    except Exception as e:
-                        st.warning(f"Erreur téléchargement: {e}")
-                else:
-                    st.warning("Sélection incomplète…")
+                st.session_state['visite1_img_path'] = path1
+                st.session_state['visite2_img_path'] = path2
+                prov1 = data1.get("provider")
+                prov2 = data2.get("provider")
+                st.session_state['visite1_provider'] = "Placeholder" if not prov1 or prov1 == "placeholder" else prov1
+                st.session_state['visite2_provider'] = "Placeholder" if not prov2 or prov2 == "placeholder" else prov2
+                st.session_state['visites_locked'] = True
+                st.success("Images confirmées (2/2). Elles seront utilisées à la génération.")
     st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
 
     # Points forts & Challenges (Slide 5)
