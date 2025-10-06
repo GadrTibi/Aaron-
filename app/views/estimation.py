@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
@@ -13,8 +14,7 @@ from app.services.poi import (
     list_bus_lines,
 )
 from app.services.geocode import geocode_address
-from app.services.image_search import find_place_image_urls
-from app.services.image_cache import save_url_to_cache
+from app.services.image_fetcher import get_poi_image, NO_IMAGE_PLACEHOLDER
 from app.services.map_image import build_static_map
 
 from .utils import _sanitize_filename, list_templates
@@ -39,14 +39,26 @@ def _resolve_base_nightly_price() -> float:
                 continue
     raise ValueError("Paramètre 'base_nightly_price' introuvable dans l'état de l'application.")
 
+
+def _guess_city_country(address: str | None) -> tuple[str | None, str | None]:
+    if not address:
+        return None, None
+    parts = [part.strip() for part in re.split(r"[\n,]", address) if part.strip()]
+    if len(parts) >= 2:
+        city = parts[-2]
+        country = parts[-1]
+    elif parts:
+        city = parts[-1]
+        country = None
+    else:
+        city = country = None
+    return (city or None, country or None)
+
+
 def render(config):
     TPL_DIR = config['TPL_DIR']
     EST_TPL_DIR = config['EST_TPL_DIR']
     OUT_DIR = config['OUT_DIR']
-    IMG_CACHE_DIR = config['IMG_CACHE_DIR']
-
-    if "visites_locked" not in st.session_state:
-        st.session_state['visites_locked'] = False
 
     # ---------- APPLY PENDING PREFILL BEFORE WIDGETS ----------
     if "__prefill" in st.session_state and isinstance(st.session_state["__prefill"], dict):
@@ -54,6 +66,10 @@ def render(config):
         for k, v in st.session_state["__prefill"].items():
             st.session_state[k] = v
         st.session_state.pop("__prefill", None)
+
+    for legacy_key in ("visite1_imgs", "visite2_imgs", "visite1_choice", "visite2_choice", "visites_locked"):
+        if legacy_key in st.session_state:
+            st.session_state.pop(legacy_key, None)
 
     # ---- Templates Estimation (PPTX) ----
     st.subheader("Templates Estimation (PPTX)")
@@ -189,118 +205,52 @@ def render(config):
         default=default_vis or vis_list[:2]
     )
     sel_vis = sel_vis[:2]
-    prev_v1, prev_v2 = st.session_state.get('v1', ''), st.session_state.get('v2', '')
-    new_v1 = sel_vis[0] if len(sel_vis) > 0 else ""
-    new_v2 = sel_vis[1] if len(sel_vis) > 1 else ""
-    if new_v1 != prev_v1:
-        st.session_state['visite1_imgs'] = []
-        st.session_state.pop('visite1_choice', None)
-    if new_v2 != prev_v2:
-        st.session_state['visite2_imgs'] = []
-        st.session_state.pop('visite2_choice', None)
-    st.session_state['v1'] = new_v1
-    st.session_state['v2'] = new_v2
-
-    if "visite1_imgs" not in st.session_state:
-        st.session_state.visite1_imgs = []
-    if "visite2_imgs" not in st.session_state:
-        st.session_state.visite2_imgs = []
+    st.session_state['v1'] = sel_vis[0] if len(sel_vis) > 0 else ""
+    st.session_state['v2'] = sel_vis[1] if len(sel_vis) > 1 else ""
 
     address = st.session_state.get("bien_addr", "")
+    city_hint, country_hint = _guess_city_country(address)
 
-    visites_locked = st.session_state.get('visites_locked', False)
-    if visites_locked:
-        p1 = st.session_state.get('visite1_img_path', '')
-        p2 = st.session_state.get('visite2_img_path', '')
-        st.success(
-            f"✅ Images confirmées\n- Visite 1 : {os.path.basename(p1) if p1 else ''}\n- Visite 2 : {os.path.basename(p2) if p2 else ''}"
-        )
-        if st.button("Réinitialiser images"):
-            st.session_state.pop('visite1_img_path', None)
-            st.session_state.pop('visite2_img_path', None)
-            st.session_state['visites_locked'] = False
-            st.session_state.pop('visite1_imgs', None)
-            st.session_state.pop('visite2_imgs', None)
-            st.session_state.pop('visite1_choice', None)
-            st.session_state.pop('visite2_choice', None)
-            st.info("Images réinitialisées.")
-    else:
-        st.info("Sélectionnez 2 images puis cliquez sur Confirmer les images.")
-        cimg1, cimg2 = st.columns(2)
-        with cimg1:
-            if st.button("Chercher images pour Visite 1"):
-                st.session_state.visite1_imgs = find_place_image_urls(
-                    st.session_state.get("v1", "") or "",
-                    city=address,
-                    lang="fr",
-                    limit=6,
-                )
-                if not st.session_state.visite1_imgs:
-                    st.info("Aucune image trouvée")
-            if st.session_state.visite1_imgs:
-                st.write("Choisir une image pour Visite 1 :")
-                imgs = st.session_state.visite1_imgs
-                for i in range(0, len(imgs), 3):
-                    row = imgs[i:i+3]
-                    cols = st.columns(3)
-                    for url, col in zip(row, cols):
-                        col.image(url, width=200)
-                st.radio(
-                    "Sélection", list(range(1, len(imgs)+1)),
-                    format_func=lambda i: f"Image {i}",
-                    key="visite1_choice",
-                    index=None,
-                )
-        with cimg2:
-            if st.button("Chercher images pour Visite 2"):
-                st.session_state.visite2_imgs = find_place_image_urls(
-                    st.session_state.get("v2", "") or "",
-                    city=address,
-                    lang="fr",
-                    limit=6,
-                )
-                if not st.session_state.visite2_imgs:
-                    st.info("Aucune image trouvée")
-            if st.session_state.visite2_imgs:
-                st.write("Choisir une image pour Visite 2 :")
-                imgs = st.session_state.visite2_imgs
-                for i in range(0, len(imgs), 3):
-                    row = imgs[i:i+3]
-                    cols = st.columns(3)
-                    for url, col in zip(row, cols):
-                        col.image(url, width=200)
-                st.radio(
-                    "Sélection", list(range(1, len(imgs)+1)),
-                    format_func=lambda i: f"Image {i}",
-                    key="visite2_choice",
-                    index=None,
-                )
-        if st.button("Confirmer les images"):
-            urls1 = st.session_state.get('visite1_imgs') or []
-            urls2 = st.session_state.get('visite2_imgs') or []
-            choice1 = st.session_state.get('visite1_choice')
-            choice2 = st.session_state.get('visite2_choice')
-            if not (urls1 and choice1 and urls2 and choice2):
-                st.warning("Sélection incomplète…")
-            else:
-                idx1 = int(choice1) - 1
-                idx2 = int(choice2) - 1
-                if 0 <= idx1 < len(urls1) and 0 <= idx2 < len(urls2):
-                    try:
-                        path1 = save_url_to_cache(urls1[idx1], IMG_CACHE_DIR)
-                        path2 = save_url_to_cache(urls2[idx2], IMG_CACHE_DIR)
-                        st.session_state['visite1_img_path'] = path1
-                        st.session_state['visite2_img_path'] = path2
-                        st.session_state['visites_locked'] = True
-                        st.session_state['visite1_imgs'] = []
-                        st.session_state['visite2_imgs'] = []
-                        st.session_state.pop('visite1_choice', None)
-                        st.session_state.pop('visite2_choice', None)
-                        st.success("Images confirmées (2/2). Elles seront utilisées à la génération.")
-                    except Exception as e:
-                        st.warning(f"Erreur téléchargement: {e}")
-                else:
-                    st.warning("Sélection incomplète…")
+    refresh_images = st.button("Rafraîchir les images des visites")
+
+    def _update_poi_image(slot: str, poi_label: str | None, force: bool = False) -> None:
+        path_key = f"{slot}_img_path"
+        query_key = f"{slot}_img_query"
+        if not poi_label:
+            st.session_state.pop(path_key, None)
+            st.session_state.pop(query_key, None)
+            return
+        if force:
+            st.session_state.pop(query_key, None)
+        query = " ".join(part for part in [poi_label, city_hint, country_hint] if part)
+        if st.session_state.get(query_key) == query and st.session_state.get(path_key):
+            return
+        image_path = get_poi_image(poi_label, city_hint, country_hint)
+        st.session_state[path_key] = image_path
+        st.session_state[query_key] = query
+
+    _update_poi_image("visite1", st.session_state.get('v1'), refresh_images)
+    _update_poi_image("visite2", st.session_state.get('v2'), refresh_images)
+
+    def _render_poi_preview(title: str, poi_label: str | None, path_key: str) -> None:
+        st.write(f"**{title}**")
+        if not poi_label:
+            st.caption("Sélectionnez un lieu pour générer automatiquement son image.")
+            return
+        st.caption(poi_label)
+        image_path = st.session_state.get(path_key)
+        if image_path and os.path.exists(image_path) and image_path != NO_IMAGE_PLACEHOLDER:
+            st.image(image_path, use_column_width=True)
+        else:
+            st.markdown("🖼️ **Image non disponible**")
+            st.caption("Image non disponible")
+
+    col_img1, col_img2 = st.columns(2)
+    with col_img1:
+        _render_poi_preview("Visite 1", st.session_state.get('v1'), 'visite1_img_path')
+    with col_img2:
+        _render_poi_preview("Visite 2", st.session_state.get('v2'), 'visite2_img_path')
+
     st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
 
     # Points forts & Challenges (Slide 5)
@@ -439,9 +389,9 @@ def render(config):
     image_by_shape = {}
     p1 = st.session_state.get('visite1_img_path')
     p2 = st.session_state.get('visite2_img_path')
-    if p1:
+    if p1 and os.path.exists(p1):
         image_by_shape["VISITE_1_MASK"] = p1
-    if p2:
+    if p2 and os.path.exists(p2):
         image_by_shape["VISITE_2_MASK"] = p2
 
     # === MAP ===
