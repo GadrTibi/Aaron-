@@ -2,7 +2,8 @@ import os
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
-from app.services.pptx_fill import generate_estimation_pptx
+from app.services.plots import build_estimation_histo
+from app.services.pptx_fill import generate_estimation_pptx, insert_plot_into_pptx
 from app.services.poi import (
     fetch_transports,
     list_incontournables,
@@ -23,6 +24,22 @@ def render(config):
     EST_TPL_DIR = config['EST_TPL_DIR']
     OUT_DIR = config['OUT_DIR']
     IMG_CACHE_DIR = config['IMG_CACHE_DIR']
+
+    def _resolve_base_price() -> float:
+        keys = [
+            "base_nightly_price",
+            "price_per_night",
+            "base_price",
+            "price_base",
+        ]
+        for key in keys:
+            value = st.session_state.get(key)
+            if value not in (None, ""):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+        raise ValueError("Paramètre 'base_nightly_price' introuvable. Renseignez le prix par nuitée.")
 
     if "visites_locked" not in st.session_state:
         st.session_state['visites_locked'] = False
@@ -304,6 +321,8 @@ def render(config):
     with colD:
         frais_menage = st.number_input("Frais de ménage (mensuels, €)", min_value=0.0, value=0.0, step=5.0, key="rn_menage")
 
+    st.session_state["base_nightly_price"] = float(prix_nuitee)
+
     st.markdown("**Scénarios de prix (nuitée)**")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -335,6 +354,22 @@ def render(config):
     PRIX_PESS = prix_nuitee * coef_pess
     PRIX_CIBLE = prix_nuitee * coef_cible
     PRIX_OPT = prix_nuitee * coef_opt
+
+    st.subheader("Graphique Évo du prix/nuitée")
+    if st.button("(Re)générer graphique"):
+        try:
+            base_price_value = _resolve_base_price()
+            plot_path = build_estimation_histo(base_price_value)
+            st.session_state["estimation_histo_path"] = plot_path
+            st.success("Graphique mis à jour.")
+        except ValueError as exc:
+            st.error(str(exc))
+
+    current_plot_path = st.session_state.get("estimation_histo_path")
+    if current_plot_path and os.path.exists(current_plot_path):
+        st.image(current_plot_path, caption="Évo du prix/nuitée", use_column_width=True)
+    else:
+        st.caption("Cliquez sur \"(Re)générer graphique\" pour créer l'histogramme.")
 
     # Mapping Estimation
     metro = st.session_state.get('metro_lines_auto') or []
@@ -405,8 +440,32 @@ def render(config):
         if not est_tpl_path or not os.path.exists(est_tpl_path):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
+        try:
+            base_price_value = _resolve_base_price()
+        except ValueError as exc:
+            st.error(str(exc))
+            st.stop()
+
+        try:
+            histo_path = build_estimation_histo(base_price_value)
+            st.session_state["estimation_histo_path"] = histo_path
+        except Exception as exc:
+            st.error(f"Graphique non généré: {exc}")
+            st.stop()
+
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        generate_estimation_pptx(est_tpl_path, pptx_out, mapping, image_by_shape=image_by_shape or None)
+        try:
+            generate_estimation_pptx(est_tpl_path, pptx_out, mapping, image_by_shape=image_by_shape or None)
+        except Exception as exc:
+            st.error(f"Erreur génération PPTX: {exc}")
+            st.stop()
+
+        try:
+            insert_plot_into_pptx(pptx_out, pptx_out, histo_path)
+        except Exception as exc:
+            st.error(f"Graphique non inséré: {exc}")
+            st.stop()
+
         st.success(f"OK: {pptx_out}")
         with open(pptx_out, "rb") as f:
             st.download_button("Télécharger le PPTX", data=f.read(), file_name=os.path.basename(pptx_out))

@@ -1,10 +1,19 @@
+from __future__ import annotations
+
+import logging
+import os
+import re
+from pathlib import Path
 from typing import Dict, Optional, List, Tuple
+
 from pptx import Presentation
 from pptx.util import Inches
 from PIL import Image
-import os
 
 from app.services.pptx_images import inject_tagged_image
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _walk_shapes(shapes):
@@ -69,6 +78,51 @@ def replace_text_preserving_style(shapes, mapping: Dict[str, str]) -> None:
 
 def insert_image(slide, image_path: str, left=Inches(1), top=Inches(3), width=Inches(8)) -> None:
     slide.shapes.add_picture(image_path, left, top, width=width)
+
+
+def insert_plot_into_pptx(template_path: str, output_path: str, image_path: str) -> None:
+    template = Path(template_path)
+    if not template.exists():
+        raise FileNotFoundError(f"Template PPTX introuvable: {template_path}")
+
+    image = Path(image_path)
+    if not image.exists():
+        raise FileNotFoundError(
+            f"Image du graphique introuvable: {image_path}. Générez d'abord le graphique."
+        )
+
+    prs = Presentation(template_path)
+    if len(prs.slides) <= 5:
+        raise ValueError("Le template PPTX ne contient pas la slide 6 attendue.")
+
+    slide = prs.slides[5]
+    exact_match = None
+    fallback_match = None
+    pattern = re.compile(r".*histo.*-?mask$", re.IGNORECASE)
+
+    for shape in _walk_shapes(slide.shapes):
+        name = (shape.name or "").strip()
+        if not name:
+            continue
+        if name.lower() == "estimation_histo_mask":
+            exact_match = shape
+            break
+        if fallback_match is None and pattern.match(name.lower()):
+            fallback_match = shape
+
+    target_shape = exact_match or fallback_match
+    if target_shape is None:
+        raise ValueError(
+            "Shape mask introuvable en slide 6 (attendu: 'ESTIMATION_HISTO_MASK' ou variante '*histo*-mask')."
+        )
+
+    left, top, width, height = target_shape.left, target_shape.top, target_shape.width, target_shape.height
+    slide.shapes.add_picture(str(image), left, top, width=width, height=height)
+
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    prs.save(output_path)
+    LOGGER.info("Graphique inséré dans le PPTX: %s (slide 6)", output_path)
 
 
 def replace_image_by_shape_name(prs, shape_name: str, image_path: str) -> bool:
