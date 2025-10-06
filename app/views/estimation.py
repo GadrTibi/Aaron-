@@ -1,4 +1,9 @@
+import io
+import logging
 import os
+import tempfile
+
+import pandas as pd
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
@@ -15,8 +20,11 @@ from app.services.geocode import geocode_address
 from app.services.image_search import find_place_image_urls
 from app.services.image_cache import save_url_to_cache
 from app.services.map_image import build_static_map
+from app.services.revenus_chart import load_series_from_excel, render_chart_png
 
 from .utils import _sanitize_filename, list_templates
+
+LOGGER = logging.getLogger(__name__)
 
 def render(config):
     TPL_DIR = config['TPL_DIR']
@@ -304,6 +312,54 @@ def render(config):
     with colD:
         frais_menage = st.number_input("Frais de ménage (mensuels, €)", min_value=0.0, value=0.0, step=5.0, key="rn_menage")
 
+    st.subheader("Graphique revenus (Slide 6)")
+    uploader = st.file_uploader("Fichier Excel (.xlsx)", type=["xlsx"], key="rev_xlsx")
+    if uploader:
+        bytes_data = uploader.getvalue()
+        try:
+            xls = pd.ExcelFile(io.BytesIO(bytes_data))
+        except Exception as exc:
+            st.error(f"Excel illisible: {exc}")
+            xls = None
+        if xls:
+            sheets = xls.sheet_names
+            default_idx = sheets.index("Feuil1") if "Feuil1" in sheets else 0
+            sheet = st.selectbox("Feuille", options=sheets, index=default_idx, key="rev_sheet")
+            x_rng = st.text_input("Plage X (mois)", st.session_state.get("rev_xrng", "B4:N4"), key="rev_xrng")
+            y_rng = st.text_input("Plage Y (valeurs)", st.session_state.get("rev_yrng", "B6:N6"), key="rev_yrng")
+
+            col_prev, col_confirm = st.columns(2)
+            with col_prev:
+                preview_clicked = st.button("Prévisualiser le graphique")
+            with col_confirm:
+                confirm_clicked = st.button("Confirmer le graphique")
+
+            if preview_clicked:
+                try:
+                    labels, values = load_series_from_excel(io.BytesIO(bytes_data), sheet, x_rng, y_rng)
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+                        tmp_path = tmp_file.name
+                    render_chart_png(labels, values, tmp_path)
+                    st.session_state["revenus_chart_preview_path"] = tmp_path
+                except Exception as exc:
+                    st.error(f"Prévisualisation impossible: {exc}")
+
+            preview_path = st.session_state.get("revenus_chart_preview_path")
+            if preview_path and os.path.exists(preview_path):
+                st.image(preview_path, caption="Aperçu graphique revenus", use_column_width=True)
+
+            if confirm_clicked:
+                try:
+                    labels, values = load_series_from_excel(io.BytesIO(bytes_data), sheet, x_rng, y_rng)
+                    chart_path = os.path.join(IMG_CACHE_DIR, "revenus_chart.png")
+                    render_chart_png(labels, values, chart_path)
+                    st.session_state["revenus_chart_path"] = chart_path
+                    st.session_state["revenus_chart_preview_path"] = chart_path
+                    LOGGER.info("Revenus chart saved: %s", chart_path)
+                    st.success("Graphique confirmé")
+                except Exception as exc:
+                    st.error(f"Graphique non confirmé: {exc}")
+
     st.markdown("**Scénarios de prix (nuitée)**")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -385,6 +441,10 @@ def render(config):
         image_by_shape["VISITE_1_MASK"] = p1
     if p2:
         image_by_shape["VISITE_2_MASK"] = p2
+
+    rev_chart_path = st.session_state.get("revenus_chart_path")
+    if rev_chart_path:
+        image_by_shape["REVENUS_CHART_MASK"] = rev_chart_path
 
     # === MAP ===
     lat = st.session_state.get("geo_lat")

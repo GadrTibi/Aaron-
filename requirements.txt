@@ -6,3 +6,4 @@ reportlab
 Pillow
 matplotlib
 staticmap
+openpyxl
