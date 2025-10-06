@@ -1,10 +1,15 @@
+import logging
+import os
+import re
 from typing import Dict, Optional, List, Tuple
+
 from pptx import Presentation
 from pptx.util import Inches
 from PIL import Image
-import os
 
 from app.services.pptx_images import inject_tagged_image
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _walk_shapes(shapes):
@@ -15,6 +20,54 @@ def _walk_shapes(shapes):
         if hasattr(sh, "shapes"):
             for sub in _walk_shapes(sh.shapes):
                 yield sub
+
+
+def insert_plot_into_pptx(template_path: str, output_path: str, image_path: str) -> None:
+    """Insert the histogram image into slide 6 using the dedicated mask shape."""
+
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Fichier PPTX introuvable: {template_path}")
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(
+            f"Image d'histogramme introuvable: {image_path}. Générez le graphique avant l'export."
+        )
+
+    prs = Presentation(template_path)
+    if len(prs.slides) <= 5:
+        raise ValueError("La présentation ne contient pas de slide 6 pour y insérer l'histogramme.")
+
+    slide = prs.slides[5]
+
+    def _is_mask(name: Optional[str]) -> bool:
+        if not name:
+            return False
+        norm = name.strip()
+        if not norm:
+            return False
+        if norm.lower() == "estimation_histo_mask":
+            return True
+        return re.match(r"(?i).*histo.*-?mask$", norm) is not None
+
+    target_shape = None
+    for sh in _walk_shapes(slide.shapes):
+        if _is_mask(getattr(sh, "name", None)):
+            target_shape = sh
+            break
+
+    if target_shape is None:
+        raise ValueError(
+            "Shape mask introuvable en slide 6 (attendu: 'ESTIMATION_HISTO_MASK' ou variante '*histo*-mask')."
+        )
+
+    left, top, width, height = target_shape.left, target_shape.top, target_shape.width, target_shape.height
+
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    slide.shapes.add_picture(image_path, left, top, width=width, height=height)
+    LOGGER.info("Histogramme inséré dans la slide 6 (%s)", getattr(target_shape, "name", ""))
+    prs.save(output_path)
 
 def _rebuild_index(paragraph) -> tuple[str, list[tuple[int,int]]]:
     segs, parts = [], []
@@ -106,21 +159,6 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
     prs = Presentation(template_path)
     for slide in prs.slides:
         replace_text_preserving_style(slide.shapes, mapping)
-
-    target_slide = None
-    for slide in prs.slides:
-        texts = []
-        for sh in _walk_shapes(slide.shapes):
-            if hasattr(sh, "text_frame") and sh.text_frame:
-                texts.append(sh.text_frame.text or "")
-        text = "\n".join(texts)
-        if "Vos revenus" in text or "vos revenus" in text.lower():
-            target_slide = slide
-            break
-    if target_slide is None:
-        target_slide = prs.slides[-1]
-    if chart_image:
-        insert_image(target_slide, chart_image)
     if image_by_shape:
         for shape_name, img_path in image_by_shape.items():
             if not img_path:
@@ -133,7 +171,13 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
                 inject_tagged_image(prs, shape_name, img_path)
             else:
                 replace_image_by_shape_name(prs, shape_name, img_path)
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     prs.save(output_path)
+
+    if chart_image:
+        insert_plot_into_pptx(output_path, output_path, chart_image)
 
 
 def generate_book_pptx(template_path: str, output_path: str, mapping: Dict[str, str], image_by_shape: Optional[Dict[str, str]] = None) -> None:
