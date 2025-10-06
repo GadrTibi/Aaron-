@@ -129,7 +129,7 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
             if shape_name == "MAP_MASK":
                 replace_image_by_shape_name(prs, shape_name, img_path)
             # VISITE_1_MASK et VISITE_2_MASK conservent l'injection avec masque circulaire
-            elif shape_name in ("VISITE_1_MASK", "VISITE_2_MASK"):
+            elif shape_name in ("VISITE_1_MASK", "VISITE_2_MASK", "REVENUS_CHART_MASK"):
                 inject_tagged_image(prs, shape_name, img_path)
             else:
                 replace_image_by_shape_name(prs, shape_name, img_path)
