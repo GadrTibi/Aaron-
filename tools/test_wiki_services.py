@@ -9,8 +9,12 @@ from services.wiki_images import WikiImageService
 from services.wiki_poi import POI, WikiPOIService
 
 
+def _format_distance(distance: float) -> str:
+    return f"{round(distance):,}".replace(",", " ") + " m"
+
+
 def _format_poi(poi: POI) -> str:
-    return f"{poi.name_display} ({poi.distance_m:.0f} m)"
+    return f"{poi.name_display} ({_format_distance(poi.distance_m)})"
 
 
 def main() -> None:
@@ -19,10 +23,33 @@ def main() -> None:
     parser.add_argument("--lon", type=float, required=True, help="Longitude")
     parser.add_argument("--radius", type=int, default=1500, help="Radius in meters")
     parser.add_argument("--lang", type=str, default="fr", help="Wikipedia language")
+    parser.add_argument(
+        "--only",
+        type=str,
+        choices=["incontournables", "spots", "visits"],
+        help="Limiter l'affichage à une seule catégorie",
+    )
+
     args = parser.parse_args()
 
     poi_service = WikiPOIService(lang=args.lang)
     categories = poi_service.list_by_category(args.lat, args.lon, args.radius)
+
+    if args.only:
+        items: List[POI] = categories.get(args.only, [])
+        if args.only == "incontournables":
+            if not items:
+                print("Aucun incontournable trouvé à ce rayon.")
+            else:
+                top = items[:5]
+                print(f"Top {len(top)} incontournables:")
+                for poi in top:
+                    print(f"- {poi.name_display} ({_format_distance(poi.distance_m)})")
+        else:
+            print(f"{args.only} → {len(items)} élément(s)")
+            for poi in items[: min(3, len(items))]:
+                print("  -", _format_poi(poi))
+        return
 
     limits = {"incontournables": 15, "spots": 10, "visits": 10}
     for category, limit in limits.items():
