@@ -87,6 +87,62 @@ def test_list_by_category_limits_and_order(monkeypatch: pytest.MonkeyPatch) -> N
     assert categories["visits"][0].title == "Museum 0"
 
 
+def test_incontournables_classification_excludes_museums(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = WikiPOIService()
+
+    geo_items = [
+        {"pageid": 401, "title": "Chez Test", "lat": 0.0, "lon": 0.0, "dist": 120},
+        {"pageid": 402, "title": "Musée d'Art", "lat": 0.0, "lon": 0.0, "dist": 150},
+    ]
+    pageprops = {401: "QRESTO", 402: "QMUSEE"}
+    wd_infos = {
+        "QRESTO": {"instances": ["Q11707"], "subclasses": [], "labels": {}, "importance": 0.6},
+        "QMUSEE": {"instances": ["Q33506"], "subclasses": [], "labels": {}, "importance": 0.8},
+    }
+
+    monkeypatch.setattr(service, "_geosearch", lambda lat, lon, radius: geo_items)
+    monkeypatch.setattr(service, "_pageprops_to_qids", lambda ids: {pid: pageprops.get(pid) for pid in ids})
+    monkeypatch.setattr(service, "_wikidata_enrich", lambda qids: {qid: wd_infos[qid] for qid in qids if qid in wd_infos})
+
+    categories = service.list_by_category(0.0, 0.0, 1000)
+
+    names = [poi.title for poi in categories["incontournables"]]
+    assert "Chez Test" in names
+    assert "Musée d'Art" not in names
+    assert categories["visits"][0].title == "Musée d'Art"
+
+
+def test_incontournables_respect_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = WikiPOIService()
+
+    geo_items: List[Dict[str, object]] = []
+    pageprops: Dict[int, str] = {}
+    wd_infos: Dict[str, Dict[str, object]] = {}
+
+    for idx in range(25):
+        pageid = 500 + idx
+        geo_items.append(
+            {
+                "pageid": pageid,
+                "title": f"Restaurant {idx}",
+                "lat": 0.0,
+                "lon": 0.0,
+                "dist": 80 + idx * 30,
+            }
+        )
+        qid = f"QRESTO{idx}"
+        pageprops[pageid] = qid
+        wd_infos[qid] = {"instances": ["Q11707"], "subclasses": [], "labels": {}, "importance": 0.5}
+
+    monkeypatch.setattr(service, "_geosearch", lambda lat, lon, radius: geo_items)
+    monkeypatch.setattr(service, "_pageprops_to_qids", lambda ids: {pid: pageprops.get(pid) for pid in ids})
+    monkeypatch.setattr(service, "_wikidata_enrich", lambda qids: {qid: wd_infos[qid] for qid in qids if qid in wd_infos})
+
+    categories = service.list_by_category(0.0, 0.0, 1200)
+
+    assert len(categories["incontournables"]) <= 15
+
+
 def test_cache_utils_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     key = "sample"
     data = {"items": [1, 2, 3]}

@@ -6,7 +6,6 @@ from app.services.plots import build_estimation_histo
 from app.services.pptx_fill import generate_estimation_pptx
 from app.services.poi import (
     fetch_transports,
-    list_incontournables,
     list_spots,
     list_visites,
     list_metro_lines,
@@ -15,6 +14,8 @@ from app.services.poi import (
 from app.services.geocode import geocode_address
 from app.services.image_fetcher import debug_fetch_poi
 from app.services.map_image import build_static_map
+
+from app.views.estimation_incontournables import render_incontournables_section
 
 from .utils import _sanitize_filename, list_templates
 
@@ -128,26 +129,9 @@ def render(config):
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
-    if st.button("Charger Incontournables (≈15)"):
-        lat, lon = _geocode_main_address()
-        if lat is not None:
-            try:
-                st.session_state['incontournables_list'] = list_incontournables(
-                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
-                )
-            except Exception as e:
-                st.warning(f"Incontournables non chargés: {e}")
-    inco_list = st.session_state.get('incontournables_list', [])
-    default_inco = [x for x in [st.session_state.get('i1'), st.session_state.get('i2'), st.session_state.get('i3')] if x]
-    sel_inco = st.multiselect(
-        "Incontournables (max 3)",
-        options=inco_list,
-        default=default_inco or inco_list[:3]
-    )
-    sel_inco = sel_inco[:3]
-    st.session_state['i1'] = sel_inco[0] if len(sel_inco) > 0 else ""
-    st.session_state['i2'] = sel_inco[1] if len(sel_inco) > 1 else ""
-    st.session_state['i3'] = sel_inco[2] if len(sel_inco) > 2 else ""
+    lat = st.session_state.get("geo_lat")
+    lon = st.session_state.get("geo_lon")
+    mapping_incontournables = render_incontournables_section(config, lat, lon)
 
     if st.button("Charger Spots (≈10)"):
         lat, lon = _geocode_main_address()
@@ -413,9 +397,6 @@ def render(config):
         "[[TRANSPORT_TAXI_TEXTE]]": st.session_state.get('q_tx', ''),
         "[[TRANSPORT_METRO_TEXTE]]": metro_str,
         "[[TRANSPORT_BUS_TEXTE]]": bus_str,
-        "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
-        "[[INCONTOURNABLE_2_NOM]]": st.session_state.get('i2', ''),
-        "[[INCONTOURNABLE_3_NOM]]": st.session_state.get('i3', ''),
         "[[SPOT_1_NOM]]": st.session_state.get('s1', ''),
         "[[SPOT_2_NOM]]": st.session_state.get('s2', ''),
         "[[VISITE_1_NOM]]": st.session_state.get('v1', ''),
@@ -441,6 +422,8 @@ def render(config):
         "[[PRIX_CIBLE]]": f"{PRIX_CIBLE:.0f} €",
         "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",
     }
+
+    mapping.update(mapping_incontournables)
 
     # Images for VISITE_1/2 (from confirmed paths)
     image_by_shape = {}
