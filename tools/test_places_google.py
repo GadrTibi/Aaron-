@@ -26,6 +26,11 @@ def main() -> None:
     parser.add_argument("--lat", type=float, required=True, help="Latitude")
     parser.add_argument("--lon", type=float, required=True, help="Longitude")
     parser.add_argument("--radius", type=int, default=1500, help="Search radius in meters")
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Run the quick nearby search around the Eiffel Tower (debug)",
+    )
     args = parser.parse_args()
 
     api_key = read_local_secret("GOOGLE_MAPS_API_KEY")
@@ -34,6 +39,18 @@ def main() -> None:
         return
 
     service = GooglePlacesService(api_key)
+
+    if args.quick:
+        print("Test rapide : list_incontournables(48.8583, 2.2945, 1200, 15)")
+        try:
+            results = service.list_incontournables(48.8583, 2.2945, 1200, limit=15)
+            for place in results[:5]:
+                print("  -", _format_place(place.name, place.distance_m))
+        except Exception as exc:  # pragma: no cover - network failure handling
+            body = getattr(exc, "response_body", None)
+            snippet = (body or str(exc))[:150]
+            print(f"Erreur: {snippet}")
+        return
 
     try:
         incontournables = service.list_incontournables(args.lat, args.lon, args.radius, limit=5)

@@ -23,6 +23,15 @@ class GPlace:
     raw: dict
 
 
+class GooglePlacesError(RuntimeError):
+    """Custom error containing Google Places response details."""
+
+    def __init__(self, message: str, *, status_code: int | None = None, body: str | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_body = body
+
+
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -55,7 +64,14 @@ def dedup_and_cut(items: Iterable[GPlace], limit: int) -> list[GPlace]:
 
 class GooglePlacesService:
     _URL = "https://places.googleapis.com/v1/places:searchNearby"
-    _FIELD_MASK = "places.id,places.displayName,places.location,places.types"
+    _FIELD_MASK = (
+        "places.id,"
+        "places.displayName,"
+        "places.location,"
+        "places.types,"
+        "places.primaryType,"
+        "places.shortFormattedAddress"
+    )
 
     def __init__(self, api_key: str, session: requests.Session | None = None) -> None:
         if not api_key:
@@ -70,7 +86,8 @@ class GooglePlacesService:
             "Content-Type": "application/json",
         }
         base_delay = 0.8
-        for attempt in range(3):
+        max_attempts = 3
+        for attempt in range(max_attempts):
             try:
                 response = self.session.post(
                     self._URL,
@@ -78,28 +95,57 @@ class GooglePlacesService:
                     json=payload,
                     timeout=10,
                 )
-                if response.status_code in (429,) or 500 <= response.status_code < 600:
-                    if attempt < 2:
-                        delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.5)
-                        time.sleep(delay)
-                        continue
-                response.raise_for_status()
-                return response.json()
-            except requests.HTTPError as exc:
-                status = exc.response.status_code if exc.response is not None else None
-                if status in (429,) or (status is not None and 500 <= status < 600):
-                    if attempt < 2:
-                        delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.5)
-                        time.sleep(delay)
-                        continue
-                raise RuntimeError(f"Google Places API error: {exc}") from exc
             except requests.RequestException as exc:
-                if attempt < 2:
+                if attempt < max_attempts - 1:
                     delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.5)
                     time.sleep(delay)
                     continue
-                raise RuntimeError(f"Google Places request failed: {exc}") from exc
-        raise RuntimeError("Google Places API error: max retries exceeded")
+                raise GooglePlacesError(
+                    f"Google Places request failed: {exc}",
+                ) from exc
+
+            status = response.status_code
+            if status < 400:
+                try:
+                    return response.json()
+                except ValueError as exc:
+                    raise GooglePlacesError("Google Places API returned invalid JSON") from exc
+
+            retryable = status == 429 or 500 <= status < 600
+            if retryable and attempt < max_attempts - 1:
+                delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.5)
+                time.sleep(delay)
+                continue
+
+            error_hint = self._explain_bad_request(response)
+            body_snippet = (response.text or "")[:500].strip()
+            details_parts: list[str] = []
+            if error_hint:
+                details_parts.append(error_hint)
+            if body_snippet and (not error_hint or error_hint not in body_snippet):
+                details_parts.append(body_snippet)
+            details = " | ".join(details_parts) if details_parts else body_snippet or "Unknown error"
+            raise GooglePlacesError(
+                f"Google Places API error ({status}): {details}",
+                status_code=status,
+                body=body_snippet,
+            )
+
+        raise GooglePlacesError("Google Places API error: max retries exceeded")
+
+    @staticmethod
+    def _explain_bad_request(response: requests.Response) -> str:
+        try:
+            data = response.json()
+        except ValueError:
+            return ""
+        error = data.get("error") if isinstance(data, dict) else None
+        if not isinstance(error, dict):
+            return ""
+        message = error.get("message")
+        if isinstance(message, str):
+            return message
+        return ""
 
     def _nearby(
         self,
@@ -110,14 +156,25 @@ class GooglePlacesService:
         keyword: str | None = None,
         limit: int = 50,
     ) -> list[GPlace]:
+        cleaned_types = [t for t in included_types if isinstance(t, str) and t.strip()]
+        if not cleaned_types:
+            raise ValueError("included_types must contain at least one type")
+
+        radius = float(radius_m)
+        radius = max(50.0, min(50000.0, radius))
+
+        limit = max(0, int(limit))
+        max_result_count = min(50, max(1, limit * 3 if limit else 50))
+
         payload: dict = {
-            "includedTypes": included_types,
+            "includedTypes": cleaned_types,
             "locationBias": {
                 "circle": {
                     "center": {"latitude": lat, "longitude": lon},
-                    "radius": radius_m,
+                    "radius": radius,
                 }
             },
+            "maxResultCount": max_result_count,
             "languageCode": "fr",
         }
         if keyword:
@@ -175,7 +232,7 @@ class GooglePlacesService:
             "department_store",
             "supermarket",
         ]
-        return self._nearby(lat, lon, radius_m, included, None, limit * 3)[:limit]
+        return self._nearby(lat, lon, radius_m, included, None, limit)
 
     def list_spots(
         self,
@@ -210,7 +267,7 @@ class GooglePlacesService:
             "amusement_park",
             "botanical_garden",
         ]
-        return self._nearby(lat, lon, radius_m, included, None, limit * 3)[:limit]
+        return self._nearby(lat, lon, radius_m, included, None, limit)
 
 
-__all__ = ["GPlace", "GooglePlacesService", "dedup_and_cut"]
+__all__ = ["GPlace", "GooglePlacesService", "dedup_and_cut", "GooglePlacesError"]
