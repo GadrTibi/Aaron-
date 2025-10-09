@@ -6,16 +6,13 @@ from typing import Dict, List
 import pytest
 
 from config import wiki_settings
-from services import cache_utils
 from services.wiki_images import ImageCandidate, WikiImageService
 from services.wiki_poi import WikiPOIService
 
 
 @pytest.fixture(autouse=True)
 def patch_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    cache_dir = tmp_path / "cache"
     images_dir = tmp_path / "images"
-    monkeypatch.setattr(wiki_settings, "CACHE_DIR", str(cache_dir))
     monkeypatch.setattr(wiki_settings, "IMAGES_DIR", str(images_dir))
     monkeypatch.setattr(WikiPOIService, "_SLEEP_SECONDS", 0.0)
     monkeypatch.setattr(WikiImageService, "_SLEEP_SECONDS", 0.0)
@@ -87,21 +84,13 @@ def test_list_by_category_limits_and_order(monkeypatch: pytest.MonkeyPatch) -> N
     assert categories["visits"][0].title == "Museum 0"
 
 
-def test_cache_utils_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    key = "sample"
-    data = {"items": [1, 2, 3]}
-    monkeypatch.setattr(wiki_settings, "CACHE_DIR", str(tmp_path / "cache"))
-    cache_utils.write_cache_json(key, data)
-    loaded = cache_utils.read_cache_json(key, 10)
-    assert loaded == data
-
-
 def test_image_candidates_with_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     service = WikiImageService()
     candidate_main = ImageCandidate(url="https://img/1.jpg", thumb_url=None, width=1200, height=900, source="wikidata_p18")
     candidate_category = ImageCandidate(url="https://img/2.jpg", thumb_url=None, width=1300, height=900, source="commons_qid")
     candidate_search = ImageCandidate(url="https://img/3.jpg", thumb_url=None, width=1100, height=800, source="commons_text")
 
+    monkeypatch.setattr(service, "_search_wikidata_item", lambda title, city, country: "Q1")
     monkeypatch.setattr(service, "_from_wikidata_p18", lambda qid, seen: [candidate_main])
     monkeypatch.setattr(service, "_from_commons_category", lambda qid, seen: [candidate_category])
     monkeypatch.setattr(
@@ -110,13 +99,14 @@ def test_image_candidates_with_fallback(monkeypatch: pytest.MonkeyPatch) -> None
         lambda title, city, country, limit, seen: [candidate_search],
     )
 
-    candidates = service.candidates("Q1", "Test Museum", "Paris", "France", limit=3)
+    candidates = service.candidates("Test Museum", "Paris", "France", limit=3)
     assert [c.url for c in candidates] == ["https://img/1.jpg", "https://img/2.jpg", "https://img/3.jpg"]
 
 
 def test_image_candidates_placeholder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(wiki_settings, "IMAGES_DIR", str(tmp_path / "images"))
     service = WikiImageService()
+    monkeypatch.setattr(service, "_search_wikidata_item", lambda title, city, country: None)
     monkeypatch.setattr(service, "_from_wikidata_p18", lambda qid, seen: [])
     monkeypatch.setattr(service, "_from_commons_category", lambda qid, seen: [])
     monkeypatch.setattr(
@@ -125,7 +115,7 @@ def test_image_candidates_placeholder(monkeypatch: pytest.MonkeyPatch, tmp_path:
         lambda title, city, country, limit, seen: [],
     )
 
-    candidates = service.candidates(None, "Unknown Place", None, None, limit=2)
+    candidates = service.candidates("Unknown Place", None, None, limit=2)
     assert len(candidates) == 1
     assert Path(candidates[0].url).exists()
 
