@@ -258,16 +258,11 @@ class GooglePlacesService:
         lon: float,
         radius_m: int,
         text_query: str,
-        included_types: list[str] | None,
         max_results: int,
     ) -> list[dict]:
         query = str(text_query).strip()
         if not query:
             raise ValueError("text_query must not be empty")
-
-        filtered_types = _clamp_nearby_types(
-            [t.strip() for t in (included_types or []) if isinstance(t, str)]
-        )
 
         target = max(0, int(max_results))
         if target <= 0:
@@ -275,7 +270,6 @@ class GooglePlacesService:
 
         payload = {
             "textQuery": query,
-            "includedTypes": filtered_types,
             "locationBias": {
                 "circle": {
                     "center": {"latitude": lat, "longitude": lon},
@@ -285,7 +279,12 @@ class GooglePlacesService:
             "maxResultCount": min(MAX_PER_CALL, target),
             "languageCode": "fr",
         }
-        data = self._post("places:searchText", payload)
+        try:
+            data = self._post("places:searchText", payload)
+        except GooglePlacesError as exc:
+            if exc.status_code and exc.status_code >= 400:
+                raise RuntimeError(str(exc)) from exc
+            raise
         return data.get("places", []) or []
 
     @staticmethod
@@ -377,7 +376,6 @@ class GooglePlacesService:
             lon,
             radius_m,
             "belvédère",
-            included_types=["tourist_attraction"],
             max_results=limit,
         )
         r3 = self._search_text(
@@ -385,7 +383,6 @@ class GooglePlacesService:
             lon,
             radius_m,
             "rooftop panorama",
-            included_types=["tourist_attraction"],
             max_results=limit,
         )
         r4 = self._search_text(
@@ -393,7 +390,6 @@ class GooglePlacesService:
             lon,
             radius_m,
             "plage beach",
-            included_types=["tourist_attraction"],
             max_results=limit,
         )
         places = (
@@ -429,7 +425,6 @@ class GooglePlacesService:
             lon,
             radius_m,
             "cathédrale",
-            included_types=["church"],
             max_results=limit,
         )
         r3 = self._search_text(
@@ -437,7 +432,6 @@ class GooglePlacesService:
             lon,
             radius_m,
             "palais",
-            included_types=["tourist_attraction"],
             max_results=limit,
         )
         r4 = self._search_text(
@@ -445,7 +439,6 @@ class GooglePlacesService:
             lon,
             radius_m,
             "château",
-            included_types=["tourist_attraction"],
             max_results=limit,
         )
         places = (
