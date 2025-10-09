@@ -1,6 +1,7 @@
 import math
+import re
 import requests
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple, Union
 
 try:
     import streamlit as st  # type: ignore
@@ -215,65 +216,126 @@ def list_visites(lat: float, lon: float, radius_m: int = 1200, limit: int = 10) 
 
 
 @_cache_if_available(ttl=300)
-def _list_metro_lines_cached(_: str, lat: float, lon: float, radius_m: int) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def _list_metro_lines_cached(_: str, lat: float, lon: float, radius_m: int) -> Tuple[List[str], Dict[str, Any]]:
     return _list_metro_lines_uncached(lat, lon, radius_m)
 
 
-def _list_metro_lines_uncached(lat: float, lon: float, radius_m: int) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    radius = max(int(radius_m), 150)
-    r1 = min(radius, 1200)
-    attempt = 0
-    debug: Dict[str, Any] = {}
-    items: List[Dict[str, Any]] = []
-    while True:
-        query = (
-            f"[out:json][timeout:25];\n"
-            f"nwr(around:{r1},{lat},{lon})[railway=station];\n"
-            f"nwr(around:{r1},{lat},{lon})[railway=stop];\n"
-            f"nwr(around:{r1},{lat},{lon})[railway=tram_stop];\n"
-            "out center 120;"
-        )
-        elements, query_debug = query_overpass(query, f"metro_r{r1}")
-        debug = {**query_debug, "radius": r1}
-        seen_points = set()
-        line_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        for element in elements:
-            tags = element.get("tags") or {}
-            name = tags.get("name")
-            lat2, lon2 = _extract_coords(element)
-            if lat2 is None or lon2 is None:
+def _list_metro_lines_uncached(lat: float, lon: float, radius_m: int) -> Tuple[List[str], Dict[str, Any]]:
+    r1 = max(1, int(min(radius_m, 2000)))
+
+    def _format_relation_label(tags: Dict[str, Any]) -> Tuple[str | None, str | None]:
+        raw_ref = (tags.get("ref") or "").strip()
+        name = (tags.get("name") or "").strip()
+        if raw_ref and raw_ref.isdigit():
+            return raw_ref.lower(), f"Ligne {raw_ref}"
+        if raw_ref and raw_ref.upper().startswith("M") and raw_ref[1:].isdigit():
+            value = raw_ref[1:]
+            return value.lower(), f"Ligne {value}"
+        if raw_ref:
+            key = raw_ref.lower()
+            if name:
+                return key, name
+            return key, raw_ref
+        if name:
+            return name.lower(), name
+        network = (tags.get("network") or "").strip()
+        if network:
+            return f"network:{network.lower()}", network
+        operator = (tags.get("operator") or "").strip()
+        if operator:
+            return f"operator:{operator.lower()}", operator
+        return None, None
+
+    # ---- PASS A: relations subway ----
+    query_rel = (
+        "[out:json][timeout:25];\n"
+        f"rel(around:{r1},{lat},{lon})[type=route][route=subway];\n"
+        "out tags center;"
+    )
+    elements_rel, debug_rel = query_overpass(query_rel, f"metro_rel_r{r1}")
+    relation_candidates: Dict[str, Tuple[int, str]] = {}
+    for element in elements_rel:
+        if element.get("type") != "relation":
+            continue
+        tags = element.get("tags") or {}
+        key, label = _format_relation_label(tags)
+        if not key or not label:
+            continue
+        lat2, lon2 = _extract_coords(element)
+        if lat2 is None or lon2 is None:
+            continue
+        distance = int(_haversine(lat, lon, lat2, lon2))
+        current = relation_candidates.get(key)
+        if current is None or distance < current[0]:
+            relation_candidates[key] = (distance, label)
+
+    sorted_relations = sorted(relation_candidates.values(), key=lambda item: item[0])
+    relation_labels = [label for _, label in sorted_relations]
+    debug: Dict[str, Any] = {
+        **debug_rel,
+        "radius": r1,
+        "relations": len(sorted_relations),
+        "pass": "A",
+    }
+    if relation_labels:
+        debug["items"] = len(relation_labels)
+        return relation_labels, debug
+
+    # ---- PASS B: fallback entrances ----
+    query_nodes = (
+        "[out:json][timeout:25];\n"
+        "(\n"
+        f"  node(around:{r1},{lat},{lon})[railway=subway_entrance];\n"
+        f"  node(around:{r1},{lat},{lon})[station=subway];\n"
+        f"  node(around:{r1},{lat},{lon})[public_transport=station][subway=yes];\n"
+        f"  node(around:{r1},{lat},{lon})[railway=station][station=subway];\n"
+        ");\n"
+        "out tags center 120;"
+    )
+    elements_nodes, debug_nodes = query_overpass(query_nodes, f"metro_nodes_r{r1}")
+    fallback_candidates: Dict[str, Tuple[int, str]] = {}
+    for element in elements_nodes:
+        tags = element.get("tags") or {}
+        lat2, lon2 = _extract_coords(element)
+        if lat2 is None or lon2 is None:
+            continue
+        distance = int(_haversine(lat, lon, lat2, lon2))
+        hints: List[str] = []
+        raw_ref = (tags.get("ref") or "").strip()
+        if raw_ref:
+            for token in _split_refs(raw_ref):
+                hints.append(token)
+        name = tags.get("name") or ""
+        hints.extend(match.strip() for match in _LINE_HINT_RE.findall(name))
+        for hint in hints:
+            if not hint:
                 continue
-            point_key = _dedupe_key(lat2, lon2, name)
-            if point_key in seen_points:
+            normalized = hint.strip()
+            if not normalized:
                 continue
-            seen_points.add(point_key)
-            distance = int(_haversine(lat, lon, lat2, lon2))
-            ref_pairs: List[Tuple[str, str]] = [(value, "ref") for value in _split_refs(tags.get("ref"))]
-            if not ref_pairs and tags.get("name"):
-                ref_pairs.append((tags["name"], "name"))
-            if not ref_pairs and tags.get("network"):
-                ref_pairs.append((tags["network"], "network"))
-            for ref_value, origin in ref_pairs:
-                key = (ref_value.lower(), origin)
-                line = line_map.get(key)
-                label = tags.get("name") or (f"Ligne {ref_value}" if ref_value else "Métro")
-                if line is None or distance < line["distance_m"]:
-                    line_map[key] = {
-                        "ref": ref_value if origin == "ref" else None,
-                        "name": label,
-                        "distance_m": distance,
-                    }
-        items = sorted(line_map.values(), key=lambda item: item["distance_m"])
-        debug["items"] = len(items)
-        if not _should_retry_radius(items, debug, attempt):
-            break
-        new_radius = max(int(r1 / 1.5), 120)
-        if new_radius >= r1:
-            break
-        debug["radius_reduced"] = True
-        r1 = new_radius
-        attempt += 1
-    return items, debug
+            cleaned = normalized
+            if cleaned.upper().startswith("M") and cleaned[1:].isdigit():
+                cleaned = cleaned[1:]
+            cleaned = cleaned.strip()
+            if not cleaned:
+                continue
+            label = f"Ligne {cleaned}"
+            key = cleaned.lower()
+            current = fallback_candidates.get(key)
+            if current is None or distance < current[0]:
+                fallback_candidates[key] = (distance, label)
+
+    sorted_fallback = sorted(fallback_candidates.values(), key=lambda item: item[0])
+    fallback_labels = [label for _, label in sorted_fallback]
+    debug = {
+        **debug_nodes,
+        "radius": r1,
+        "relations": len(sorted_relations),
+        "fallback": True,
+        "pass": "B",
+    }
+    debug["items"] = len(fallback_labels)
+    return fallback_labels, debug
 
 
 def _split_refs(raw: str | None) -> List[str]:
@@ -292,14 +354,20 @@ def list_metro_lines(
     lon: float,
     radius_m: int = 1200,
     limit: int = 3,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    *,
+    include_debug: bool = False,
+) -> Union[List[str], Tuple[List[str], Dict[str, Any]]]:
+    """Retourne p.ex. ['Ligne 3', 'Ligne 14'] (max=limit)."""
+
     lat_key = round(float(lat), 5)
     lon_key = round(float(lon), 5)
     radius_key = int(radius_m)
     items, debug = _list_metro_lines_cached("list_metro_lines", lat_key, lon_key, radius_key)
     limited = items[:limit]
     debug = {**debug, "items": len(limited)}
-    return limited, debug
+    if include_debug:
+        return limited, debug
+    return limited
 
 
 @_cache_if_available(ttl=300)
@@ -373,3 +441,4 @@ def list_bus_lines(
     limited = items[:limit]
     debug = {**debug, "items": len(limited)}
     return limited, debug
+_LINE_HINT_RE = re.compile(r"(?:M|Ligne)\s*([A-Za-z0-9]+)", re.IGNORECASE)

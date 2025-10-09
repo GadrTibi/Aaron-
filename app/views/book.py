@@ -29,13 +29,17 @@ def _format_taxi_summary(items: list[dict]) -> str:
     return f"{name} ({distance} m – {mins} min)"
 
 
-def _format_line_labels(items: list[dict], prefix: str) -> str:
+def _format_line_labels(items: list, prefix: str) -> str:
     labels: list[str] = []
     for item in items:
-        ref = item.get("ref") or item.get("name")
-        if not ref:
+        if isinstance(item, str):
+            labels.append(item)
             continue
-        labels.append(f"{prefix} {ref}" if prefix else str(ref))
+        if isinstance(item, dict):
+            ref = item.get("ref") or item.get("name")
+            if not ref:
+                continue
+            labels.append(f"{prefix} {ref}" if prefix else str(ref))
     return ", ".join(labels)
 
 
@@ -134,7 +138,9 @@ def render(config: dict) -> None:
             try:
                 radius = st.session_state.get("radius_m", 1200)
                 taxi_items, taxi_debug = fetch_transports(lat, lon, radius_m=radius)
-                metro_items, metro_debug = list_metro_lines(lat, lon, radius_m=radius)
+                metro_items, metro_debug = list_metro_lines(
+                    lat, lon, radius_m=radius, include_debug=True
+                )
                 bus_items, bus_debug = list_bus_lines(lat, lon, radius_m=radius)
                 st.session_state["q_tx"] = _format_taxi_summary(taxi_items)
                 st.session_state["metro_lines_auto"] = metro_items
