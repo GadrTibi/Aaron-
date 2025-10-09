@@ -14,7 +14,6 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 
 from config import wiki_settings
-from services.cache_utils import read_cache_json, write_cache_json
 
 logger = logging.getLogger(__name__)
 
@@ -51,33 +50,29 @@ class WikiImageService:
 
     def candidates(
         self,
-        qid: str | None,
         title: str,
         city: str | None,
         country: str | None,
         limit: int = 5,
     ) -> List[ImageCandidate]:
-        key = f"imgcand:{qid}:{title}:{city}:{country}:{limit}"
-        cached = read_cache_json(key, wiki_settings.CACHE_TTL_SEC)
-        if cached:
-            return [ImageCandidate.from_dict(item) for item in cached.get("items", [])]
-
         collected: List[ImageCandidate] = []
         seen: set[str] = set()
+
+        qid = self._search_wikidata_item(title, city, country)
         if qid:
             collected.extend(self._from_wikidata_p18(qid, seen))
-            collected.extend(self._from_commons_category(qid, seen))
+            if len(collected) < limit:
+                collected.extend(self._from_commons_category(qid, seen))
+
         if len(collected) < limit:
+            remaining = limit - len(collected)
             collected.extend(
-                self._from_commons_search(title, city, country, limit - len(collected), seen)
+                self._from_commons_search(title, city, country, remaining, seen)
             )
 
         deduped = collected[:limit]
         if not deduped:
-            placeholder = self._placeholder_candidate(title, city, country)
-            write_cache_json(key, {"items": [placeholder.to_dict()]})
-            return [placeholder]
-        write_cache_json(key, {"items": [c.to_dict() for c in deduped]})
+            return [self._placeholder_candidate(title, city, country)]
         return deduped
 
     def download(self, url: str | None) -> str:
@@ -122,6 +117,41 @@ class WikiImageService:
                 delay = backoff * (2 ** attempt) + random.uniform(0, wiki_settings.RETRY_JITTER)
                 time.sleep(delay)
         raise RuntimeError("unreachable")
+
+    def _search_wikidata_item(
+        self, title: str, city: str | None, country: str | None
+    ) -> str | None:
+        search_terms = [title]
+        if city:
+            search_terms.append(city)
+        if country:
+            search_terms.append(country)
+        query = " ".join(term for term in search_terms if term).strip()
+        if not query:
+            return None
+        params = {
+            "action": "wbsearchentities",
+            "search": query,
+            "language": self.lang,
+            "limit": 5,
+            "type": "item",
+            "format": "json",
+        }
+        url = "https://www.wikidata.org/w/api.php"
+        data = self._request_json(url, params)
+        search_results = data.get("search", [])
+        best_id: str | None = None
+        title_lower = title.lower()
+        for entry in search_results:
+            qid = entry.get("id")
+            if not qid:
+                continue
+            label = (entry.get("label") or "").lower()
+            if label and title_lower in label:
+                return qid
+            if best_id is None:
+                best_id = qid
+        return best_id
 
     def _from_wikidata_p18(self, qid: str, seen: set[str]) -> List[ImageCandidate]:
         params = {
