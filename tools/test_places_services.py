@@ -7,6 +7,9 @@ from services.places_otm import OpenTripMapService
 
 def _print_preview(title: str, count: int, items: list[object]) -> None:
     print(f"\n[{title}] {count} résultat(s)")
+    if not items:
+        print(" (aucun résultat)")
+        return
     for item in items[:5]:
         name = getattr(item, "name", "?")
         distance = getattr(item, "distance_m", 0.0)
