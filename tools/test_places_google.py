@@ -41,15 +41,29 @@ def main() -> None:
     service = GooglePlacesService(api_key)
 
     if args.quick:
-        print("Test rapide : list_incontournables(48.8583, 2.2945, 1200, 15)")
+        lat, lon, radius = 48.8583, 2.2945, 1500
+        print("Test rapide autour de la tour Eiffel (48.8583, 2.2945, r=1500m)")
         try:
-            results = service.list_incontournables(48.8583, 2.2945, 1200, limit=15)
-            for place in results[:5]:
-                print("  -", _format_place(place.name, place.distance_m))
+            incontournables = service.list_incontournables(lat, lon, radius, limit=15)
+            spots = service.list_spots(lat, lon, radius, limit=10)
+            visits = service.list_visits(lat, lon, radius, limit=10)
         except Exception as exc:  # pragma: no cover - network failure handling
             body = getattr(exc, "response_body", None)
             snippet = (body or str(exc))[:150]
             print(f"Erreur: {snippet}")
+            return
+
+        print("\nIncontournables (top 5):")
+        for place in incontournables[:5]:
+            print("  -", _format_place(place.name, place.distance_m))
+
+        print("\nSpots (top 5):")
+        for place in spots[:5]:
+            print("  -", _format_place(place.name, place.distance_m))
+
+        print("\nVisites (top 5):")
+        for place in visits[:5]:
+            print("  -", _format_place(place.name, place.distance_m))
         return
 
     try:

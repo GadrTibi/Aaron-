@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 import time
 from dataclasses import dataclass
 from typing import Iterable
@@ -12,6 +13,25 @@ import requests
 EARTH_RADIUS_M = 6_371_000.0
 BASE = "https://places.googleapis.com/v1"
 FIELD_MASK = "places.id,places.displayName,places.primaryType,places.types,places.location,places.shortFormattedAddress"
+MAX_PER_CALL = 20
+ALLOWED_TYPES_NEARBY = {
+    "restaurant",
+    "cafe",
+    "bakery",
+    "bar",
+    "meal_takeaway",
+    "shopping_mall",
+    "department_store",
+    "supermarket",
+    "park",
+    "tourist_attraction",
+    "museum",
+    "art_gallery",
+    "church",
+    "zoo",
+    "amusement_park",
+    "botanical_garden",
+}
 
 
 @dataclass(slots=True)
@@ -64,6 +84,10 @@ def dedup_and_cut(items: Iterable[GPlace], limit: int) -> list[GPlace]:
     return result
 
 
+def _clamp_nearby_types(types: list[str]) -> list[str]:
+    return [t for t in types if t in ALLOWED_TYPES_NEARBY]
+
+
 class GooglePlacesService:
     def __init__(self, api_key: str, session: requests.Session | None = None) -> None:
         if not api_key:
@@ -93,14 +117,18 @@ class GooglePlacesService:
                     delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.5)
                     time.sleep(delay)
                     continue
-                raise RuntimeError(f"Google Places request failed: {exc}") from exc
+                raise GooglePlacesError(f"Google Places request failed: {exc}") from exc
 
             status = response.status_code
             if status < 400:
                 try:
                     return response.json()
                 except ValueError as exc:
-                    raise RuntimeError("Google Places error invalid JSON response") from exc
+                    raise GooglePlacesError(
+                        f"Google Places error {status}: invalid JSON response",
+                        status_code=status,
+                        body=response.text,
+                    ) from exc
 
             retryable = status == 429 or 500 <= status < 600
             if retryable and attempt < attempts - 1:
@@ -109,9 +137,14 @@ class GooglePlacesService:
                 continue
 
             message = self._extract_error_message(response)
-            raise RuntimeError(f"Google Places error {status}: {message}")
+            body_text = (response.text or "").strip()[:300]
+            raise GooglePlacesError(
+                f"Google Places error {status}: {message}",
+                status_code=status,
+                body=body_text,
+            )
 
-        raise RuntimeError("Google Places error: max retries exceeded")
+        raise GooglePlacesError("Google Places error: max retries exceeded")
 
     @staticmethod
     def _extract_error_message(response: requests.Response) -> str:
@@ -131,6 +164,22 @@ class GooglePlacesService:
             return text[:300]
         return "Unknown error"
 
+    @staticmethod
+    def _parse_unsupported_types(error_text: str) -> set[str]:
+        if not error_text:
+            return set()
+        pattern = re.compile(r"Unsupported types:\s*([^\n\r.;]+)")
+        match = pattern.search(error_text)
+        if not match:
+            return set()
+        types_part = match.group(1)
+        types: set[str] = set()
+        for chunk in re.split(r"[,\s]+", types_part):
+            chunk = chunk.strip().strip("[]'\"")
+            if chunk:
+                types.add(chunk)
+        return types
+
     def _search_nearby(
         self,
         lat: float,
@@ -139,23 +188,69 @@ class GooglePlacesService:
         included_types: list[str],
         max_results: int,
     ) -> list[dict]:
-        cleaned_types = [t.strip() for t in included_types if isinstance(t, str) and t.strip()]
-        if not cleaned_types:
-            raise ValueError("included_types must contain at least one type")
+        valid_types = _clamp_nearby_types([t.strip() for t in included_types if isinstance(t, str)])
+        if not valid_types:
+            raise ValueError("No valid includedTypes for Nearby")
 
-        payload = {
-            "includedTypes": cleaned_types,
-            "locationRestriction": {
-                "circle": {
-                    "center": {"latitude": lat, "longitude": lon},
-                    "radius": float(radius_m),
+        target = max(0, int(max_results))
+        if target <= 0:
+            return []
+
+        pending_types: list[str] = list(dict.fromkeys(valid_types))
+        collected: list[dict] = []
+        seen_ids: set[str] = set()
+
+        while pending_types and len(collected) < target:
+            current_type = pending_types.pop(0)
+            remaining = target - len(collected)
+            if remaining <= 0:
+                break
+            take = min(MAX_PER_CALL, remaining)
+            allow_retry = True
+            skip_type = False
+            while True:
+                payload = {
+                    "includedTypes": [current_type],
+                    "locationRestriction": {
+                        "circle": {
+                            "center": {"latitude": lat, "longitude": lon},
+                            "radius": float(radius_m),
+                        }
+                    },
+                    "maxResultCount": take,
+                    "languageCode": "fr",
                 }
-            },
-            "maxResultCount": max(1, min(50, int(max_results))),
-            "languageCode": "fr",
-        }
-        data = self._post("places:searchNearby", payload)
-        return data.get("places", []) or []
+                try:
+                    data = self._post("places:searchNearby", payload)
+                except GooglePlacesError as exc:
+                    unsupported = set()
+                    if exc.status_code == 400:
+                        error_text = "\n".join(filter(None, [str(exc), exc.response_body]))
+                        unsupported = self._parse_unsupported_types(error_text)
+                    if unsupported and allow_retry:
+                        allow_retry = False
+                        pending_types = [t for t in pending_types if t not in unsupported]
+                        if current_type in unsupported:
+                            skip_type = True
+                            break
+                        continue
+                    raise
+                else:
+                    places = data.get("places", []) if isinstance(data, dict) else []
+                    for place in places or []:
+                        pid = place.get("id")
+                        if pid and pid in seen_ids:
+                            continue
+                        if pid:
+                            seen_ids.add(pid)
+                        collected.append(place)
+                        if len(collected) >= target:
+                            break
+                    break
+            if skip_type:
+                continue
+
+        return collected
 
     def _search_text(
         self,
@@ -169,20 +264,25 @@ class GooglePlacesService:
         query = str(text_query).strip()
         if not query:
             raise ValueError("text_query must not be empty")
+
+        filtered_types = _clamp_nearby_types(
+            [t.strip() for t in (included_types or []) if isinstance(t, str)]
+        )
+
+        target = max(0, int(max_results))
+        if target <= 0:
+            return []
+
         payload = {
             "textQuery": query,
-            "includedTypes": [
-                t.strip()
-                for t in (included_types or [])
-                if isinstance(t, str) and t.strip()
-            ],
+            "includedTypes": filtered_types,
             "locationBias": {
                 "circle": {
                     "center": {"latitude": lat, "longitude": lon},
                     "radius": float(radius_m),
                 }
             },
-            "maxResultCount": max(1, min(50, int(max_results))),
+            "maxResultCount": min(MAX_PER_CALL, target),
             "languageCode": "fr",
         }
         data = self._post("places:searchText", payload)
@@ -228,20 +328,6 @@ class GooglePlacesService:
             )
         return results
 
-    def _nearby(
-        self,
-        lat: float,
-        lon: float,
-        radius_m: int,
-        included_types: list[str],
-        limit: int,
-    ) -> list[GPlace]:
-        limit = max(0, int(limit))
-        max_results = limit * 3 if limit else 50
-        raw_places = self._search_nearby(lat, lon, radius_m, included_types, max_results)
-        places = self._to_places(lat, lon, raw_places)
-        return dedup_and_cut(places, limit)
-
     def list_incontournables(
         self,
         lat: float,
@@ -249,7 +335,11 @@ class GooglePlacesService:
         radius_m: int,
         limit: int = 15,
     ) -> list[GPlace]:
-        included = [
+        limit = max(0, int(limit))
+        if limit == 0:
+            return []
+
+        types = [
             "restaurant",
             "cafe",
             "bakery",
@@ -259,7 +349,15 @@ class GooglePlacesService:
             "department_store",
             "supermarket",
         ]
-        return self._nearby(lat, lon, radius_m, included, limit)
+        raw_places = self._search_nearby(
+            lat,
+            lon,
+            radius_m,
+            included_types=types,
+            max_results=limit * 2,
+        )
+        places = self._to_places(lat, lon, raw_places)
+        return dedup_and_cut(places, limit)
 
     def list_spots(
         self,
@@ -268,11 +366,36 @@ class GooglePlacesService:
         radius_m: int,
         limit: int = 10,
     ) -> list[GPlace]:
-        included = ["park", "tourist_attraction", "point_of_interest"]
-        r1 = self._search_nearby(lat, lon, radius_m, included, limit * 2)
-        r2 = self._search_text(lat, lon, radius_m, "belvédère", included, limit)
-        r3 = self._search_text(lat, lon, radius_m, "rooftop panorama", included, limit)
-        r4 = self._search_text(lat, lon, radius_m, "plage beach", included, limit)
+        limit = max(0, int(limit))
+        if limit == 0:
+            return []
+
+        nearby_types = ["park", "tourist_attraction"]
+        r1 = self._search_nearby(lat, lon, radius_m, nearby_types, limit)
+        r2 = self._search_text(
+            lat,
+            lon,
+            radius_m,
+            "belvédère",
+            included_types=["tourist_attraction"],
+            max_results=limit,
+        )
+        r3 = self._search_text(
+            lat,
+            lon,
+            radius_m,
+            "rooftop panorama",
+            included_types=["tourist_attraction"],
+            max_results=limit,
+        )
+        r4 = self._search_text(
+            lat,
+            lon,
+            radius_m,
+            "plage beach",
+            included_types=["tourist_attraction"],
+            max_results=limit,
+        )
         places = (
             self._to_places(lat, lon, r1)
             + self._to_places(lat, lon, r2)
@@ -288,20 +411,49 @@ class GooglePlacesService:
         radius_m: int,
         limit: int = 10,
     ) -> list[GPlace]:
-        included = [
+        limit = max(0, int(limit))
+        if limit == 0:
+            return []
+
+        nearby_types = [
             "museum",
             "art_gallery",
-            "tourist_attraction",
             "church",
-            "cathedral",
-            "palace",
-            "castle",
             "zoo",
             "amusement_park",
             "botanical_garden",
         ]
-        raw_places = self._search_nearby(lat, lon, radius_m, included, limit * 3)
-        places = self._to_places(lat, lon, raw_places)
+        r1 = self._search_nearby(lat, lon, radius_m, nearby_types, limit)
+        r2 = self._search_text(
+            lat,
+            lon,
+            radius_m,
+            "cathédrale",
+            included_types=["church"],
+            max_results=limit,
+        )
+        r3 = self._search_text(
+            lat,
+            lon,
+            radius_m,
+            "palais",
+            included_types=["tourist_attraction"],
+            max_results=limit,
+        )
+        r4 = self._search_text(
+            lat,
+            lon,
+            radius_m,
+            "château",
+            included_types=["tourist_attraction"],
+            max_results=limit,
+        )
+        places = (
+            self._to_places(lat, lon, r1)
+            + self._to_places(lat, lon, r2)
+            + self._to_places(lat, lon, r3)
+            + self._to_places(lat, lon, r4)
+        )
         return dedup_and_cut(places, limit)
 
 
