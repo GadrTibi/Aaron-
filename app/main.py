@@ -15,7 +15,7 @@ if BASE_DIR not in sys.path:
 
 import streamlit as st
 
-from app.views import estimation, mandat, book
+from app.views import estimation, mandat, book, settings_keys
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,7 +47,7 @@ st.title("MFY - Outil local (Estimation • Mandat • Book)")
 
 with st.sidebar:
     st.header("Navigation")
-    page = st.radio("Aller à :", ["Estimation", "Mandat", "Book"])
+    page = st.radio("Aller à :", ["Estimation", "Mandat", "Book", "Paramètres / Clés API"])
     st.caption("Chaque page n'affiche que les champs nécessaires au document.")
 
 # -------- Common data (Owner & Property) shown on all pages, compact --------
@@ -81,6 +81,8 @@ elif page == "Mandat":
     mandat.render(CONFIG)
 elif page == "Book":
     book.render(CONFIG)
+elif page == "Paramètres / Clés API":
+    settings_keys.render(CONFIG)
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Quitter l'application"):

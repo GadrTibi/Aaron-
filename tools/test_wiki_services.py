@@ -37,9 +37,9 @@ def main() -> None:
         return
 
     visit = visits[0]
-    print(f"\nFetching image candidates for: {visit.title} ({visit.qid})")
+    print(f"\nFetching image candidates for: {visit.title}")
     image_service = WikiImageService(lang=args.lang)
-    candidates = image_service.candidates(visit.qid, visit.title, None, None)
+    candidates = image_service.candidates(visit.title, None, None)
     pprint.pprint([candidate.to_dict() for candidate in candidates])
     if candidates:
         try:
