@@ -1,20 +1,14 @@
 import os
+
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.plots import build_estimation_histo
 from app.services.pptx_fill import generate_estimation_pptx
-from app.services.poi import (
-    fetch_transports,
-    list_incontournables,
-    list_spots,
-    list_visites,
-    list_metro_lines,
-    list_bus_lines,
-)
 from app.services.geocode import geocode_address
-from app.services.image_fetcher import debug_fetch_poi
 from app.services.map_image import build_static_map
+from services.image_service import candidate_images, download_image, ensure_placeholder, slugify
+from services.poi_service import get_pois
 
 from .utils import _sanitize_filename, list_templates
 
@@ -42,6 +36,7 @@ def render(config):
     TPL_DIR = config['TPL_DIR']
     EST_TPL_DIR = config['EST_TPL_DIR']
     OUT_DIR = config['OUT_DIR']
+    lang = (st.session_state.get("lang") or st.session_state.get("locale") or "fr").split("-")[0]
 
     if "visites_locked" not in st.session_state:
         st.session_state['visites_locked'] = False
@@ -97,6 +92,26 @@ def render(config):
         st.session_state["geo_lon"] = lon
         return lat, lon
 
+    def _prepare_poi_options(pois, key: str):
+        mapping = {}
+        options = []
+        for poi in pois:
+            label = poi.get("display") or poi.get("title") or ""
+            base_label = label
+            dedup_index = 2
+            while label in mapping:
+                label = f"{base_label} ({dedup_index})"
+                dedup_index += 1
+            mapping[label] = poi
+            options.append(label)
+        st.session_state[f"{key}_pois"] = pois
+        st.session_state[f"{key}_map"] = mapping
+        st.session_state[f"{key}_options"] = options
+
+    def _get_poi_from_label(key: str, label: str):
+        mapping = st.session_state.get(f"{key}_map", {}) or {}
+        return mapping.get(label)
+
     # ---- Quartier & transports (Slide 4) ----
     st.subheader("Quartier (Slide 4)")
     quartier_texte = st.text_area("Texte d'intro du quartier (paragraphe)", st.session_state.get("q_txt", "Texte libre saisi par l'utilisateur."), key="q_txt")
@@ -105,26 +120,32 @@ def render(config):
         if lat is not None:
             try:
                 radius = st.session_state.get("radius_m", 1200)
-                tr = fetch_transports(lat, lon, radius_m=radius)
-                metro = list_metro_lines(lat, lon, radius_m=radius)
-                bus = list_bus_lines(lat, lon, radius_m=radius)
-                st.session_state["q_tx"] = tr.get("taxi", "")
-                st.session_state['metro_lines_auto'] = metro
-                st.session_state['bus_lines_auto'] = bus
+                transport_pois = get_pois(lat, lon, radius_m=radius, category="transport", lang=lang)
+                _prepare_poi_options(transport_pois, "transport")
+                summary_lines = [
+                    f"{poi['title']} ({int(poi.get('distance_m', 0))} m)"
+                    for poi in transport_pois[:3]
+                ]
+                st.session_state['q_tx'] = "\n".join(summary_lines)
+                st.session_state['transport_lines'] = summary_lines
             except Exception as e:
+                st.session_state['transport_lines'] = []
+                st.session_state['transport_pois'] = []
                 st.warning(f"Transports non chargés: {e}")
         else:
-            st.session_state["q_tx"] = ""
-            st.session_state['metro_lines_auto'] = []
-            st.session_state['bus_lines_auto'] = []
-    taxi_txt = st.session_state.get("q_tx", "")
-    metro_auto = st.session_state.get('metro_lines_auto', [])
-    bus_auto = st.session_state.get('bus_lines_auto', [])
-    metro_refs = ", ".join([f"Ligne {x.get('ref')}" for x in metro_auto if x.get('ref')])
-    bus_refs = ", ".join([f"Bus {x.get('ref')}" for x in bus_auto if x.get('ref')])
-    st.write(f"Taxi : {taxi_txt or '—'}")
-    st.write(f"Métro : {metro_refs or '—'}")
-    st.write(f"Bus : {bus_refs or '—'}")
+            st.session_state['transport_lines'] = []
+            st.session_state['transport_pois'] = []
+            st.session_state['q_tx'] = ""
+    transport_summary = st.session_state.get('transport_lines', [])
+    transport_pois = st.session_state.get('transport_pois', [])
+    st.write("Transports à proximité :")
+    if transport_pois:
+        for poi in transport_pois[:5]:
+            st.write(f"• {poi['display']} ({int(poi.get('distance_m', 0))} m)")
+    else:
+        st.write("• —")
+    if transport_summary:
+        st.caption("\n".join(transport_summary))
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
@@ -132,17 +153,26 @@ def render(config):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                st.session_state['incontournables_list'] = list_incontournables(
-                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
+                pois = get_pois(
+                    lat,
+                    lon,
+                    radius_m=st.session_state.get("radius_m", 1200),
+                    category="incontournables",
+                    lang=lang,
                 )
+                _prepare_poi_options(pois, "incontournables")
             except Exception as e:
                 st.warning(f"Incontournables non chargés: {e}")
-    inco_list = st.session_state.get('incontournables_list', [])
-    default_inco = [x for x in [st.session_state.get('i1'), st.session_state.get('i2'), st.session_state.get('i3')] if x]
+    inco_options = st.session_state.get('incontournables_options', [])
+    default_inco = [
+        value
+        for value in [st.session_state.get('i1'), st.session_state.get('i2'), st.session_state.get('i3')]
+        if value in inco_options
+    ]
     sel_inco = st.multiselect(
         "Incontournables (max 3)",
-        options=inco_list,
-        default=default_inco or inco_list[:3]
+        options=inco_options,
+        default=default_inco or inco_options[:3]
     )
     sel_inco = sel_inco[:3]
     st.session_state['i1'] = sel_inco[0] if len(sel_inco) > 0 else ""
@@ -153,57 +183,81 @@ def render(config):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                st.session_state['spots_list'] = list_spots(
-                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
+                pois = get_pois(
+                    lat,
+                    lon,
+                    radius_m=st.session_state.get("radius_m", 1200),
+                    category="spots",
+                    lang=lang,
                 )
+                _prepare_poi_options(pois, "spots")
             except Exception as e:
                 st.warning(f"Spots non chargés: {e}")
-    spots_list = st.session_state.get('spots_list', [])
-    default_spots = [x for x in [st.session_state.get('s1'), st.session_state.get('s2')] if x]
+    spots_options = st.session_state.get('spots_options', [])
+    default_spots = [
+        value for value in [st.session_state.get('s1'), st.session_state.get('s2')] if value in spots_options
+    ]
     sel_spots = st.multiselect(
         "Spots (max 2)",
-        options=spots_list,
-        default=default_spots or spots_list[:2]
+        options=spots_options,
+        default=default_spots or spots_options[:2]
     )
     sel_spots = sel_spots[:2]
     st.session_state['s1'] = sel_spots[0] if len(sel_spots) > 0 else ""
     st.session_state['s2'] = sel_spots[1] if len(sel_spots) > 1 else ""
 
-    st.markdown("**Lieux à visiter (2) — images auto (Unsplash → Pexels → Wikimedia)**")
+    st.markdown("**Lieux à visiter (2) — images Wikimedia**")
     if st.button("Charger Visites (≈10)"):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                st.session_state['visites_list'] = list_visites(
-                    lat, lon, radius_m=st.session_state.get("radius_m", 1200)
+                visites_pois = get_pois(
+                    lat,
+                    lon,
+                    radius_m=st.session_state.get("radius_m", 1200),
+                    category="lieux_a_visiter",
+                    lang=lang,
                 )
+                _prepare_poi_options(visites_pois, "visites")
             except Exception as e:
                 st.warning(f"Visites non chargées: {e}")
-    vis_list = st.session_state.get('visites_list', [])
-    default_vis = [x for x in [st.session_state.get('v1'), st.session_state.get('v2')] if x]
+    visites_options = st.session_state.get('visites_options', [])
+    default_vis = [
+        value for value in [st.session_state.get('v1'), st.session_state.get('v2')] if value in visites_options
+    ]
     sel_vis = st.multiselect(
         "Lieux à visiter (max 2)",
-        options=vis_list,
-        default=default_vis or vis_list[:2]
+        options=visites_options,
+        default=default_vis or visites_options[:2]
     )
     sel_vis = sel_vis[:2]
     prev_v1, prev_v2 = st.session_state.get('v1', ''), st.session_state.get('v2', '')
     new_v1 = sel_vis[0] if len(sel_vis) > 0 else ""
     new_v2 = sel_vis[1] if len(sel_vis) > 1 else ""
     if new_v1 != prev_v1:
-        st.session_state.pop('visite1_data', None)
+        st.session_state.pop('visite1_img_path', None)
+        st.session_state.pop('visite1_provider', None)
+        st.session_state.pop('visite1_candidates', None)
+        st.session_state.pop('visite1_choice', None)
+        st.session_state['visites_locked'] = False
     if new_v2 != prev_v2:
-        st.session_state.pop('visite2_data', None)
+        st.session_state.pop('visite2_img_path', None)
+        st.session_state.pop('visite2_provider', None)
+        st.session_state.pop('visite2_candidates', None)
+        st.session_state.pop('visite2_choice', None)
+        st.session_state['visites_locked'] = False
     st.session_state['v1'] = new_v1
     st.session_state['v2'] = new_v2
+    st.session_state['visite1_poi'] = _get_poi_from_label("visites", new_v1) if new_v1 else None
+    st.session_state['visite2_poi'] = _get_poi_from_label("visites", new_v2) if new_v2 else None
 
-    if "visite1_data" not in st.session_state:
-        st.session_state['visite1_data'] = None
-    if "visite2_data" not in st.session_state:
-        st.session_state['visite2_data'] = None
-
-    address = st.session_state.get("bien_addr", "")
-    country = st.session_state.get("bien_country") or st.session_state.get("bien_pays")
+    placeholder_path = ensure_placeholder()
+    for slot in ("visite1", "visite2"):
+        st.session_state.setdefault(
+            f"{slot}_candidates",
+            [{"url": placeholder_path, "provider": "placeholder", "source": "local"}],
+        )
+        st.session_state.setdefault(f"{slot}_choice", 0)
 
     visites_locked = st.session_state.get('visites_locked', False)
     if visites_locked:
@@ -220,94 +274,104 @@ def render(config):
             st.session_state.pop('visite1_img_path', None)
             st.session_state.pop('visite2_img_path', None)
             st.session_state['visites_locked'] = False
-            st.session_state.pop('visite1_data', None)
-            st.session_state.pop('visite2_data', None)
             st.session_state.pop('visite1_provider', None)
             st.session_state.pop('visite2_provider', None)
+            st.session_state.pop('visite1_candidates', None)
+            st.session_state.pop('visite2_candidates', None)
+            st.session_state.pop('visite1_choice', None)
+            st.session_state.pop('visite2_choice', None)
             st.info("Images réinitialisées.")
     else:
-        st.info("Cliquez sur « Chercher image » pour chaque visite, puis confirmez.")
+        st.info("Chargez les images proposées par Wikimedia et confirmez votre sélection.")
         cimg1, cimg2 = st.columns(2)
 
-        def _store_image(slot: str, poi_label: str) -> None:
+        def _load_candidates(slot: str, poi_label: str) -> None:
             if not poi_label:
                 st.warning("Sélectionnez d'abord un lieu dans la liste.")
                 return
-            with st.spinner("Recherche d'image…"):
-                final_path, attempts = debug_fetch_poi(poi_label, city=address or None, country=country)
-            final_attempt = next((a for a in reversed(attempts) if a.local_path), None)
-            provider = final_attempt.provider if final_attempt else ""
-            st.session_state[f"{slot}_data"] = {
-                "path": final_path,
-                "provider": provider,
-                "attempts": [
-                    {
-                        "provider": a.provider,
-                        "request_url": a.request_url,
-                        "status": a.status,
-                        "message": a.message,
-                        "image_url": a.image_url,
-                        "local_path": a.local_path,
-                        "duration_ms": a.duration_ms,
-                    }
-                    for a in attempts
-                ],
-            }
+            poi = _get_poi_from_label("visites", poi_label)
+            if not poi:
+                st.warning("POI introuvable dans la liste chargée.")
+                return
+            with st.spinner("Recherche d'images Wikimedia…"):
+                fetched = candidate_images(poi['pageid'], poi.get('qid'), lang=lang)
+            candidates = [
+                {"url": item.get("url"), "provider": item.get("provider", "wikimedia"), "source": "remote"}
+                for item in fetched
+                if item.get("url")
+            ]
+            if not candidates:
+                candidates = [{"url": placeholder_path, "provider": "placeholder", "source": "local"}]
+            st.session_state[f"{slot}_candidates"] = candidates[:5]
+            st.session_state[f"{slot}_choice"] = 0
+
+        def _display_candidates(slot: str):
+            candidates = st.session_state.get(f"{slot}_candidates", [])
+            if not candidates:
+                candidates = [{"url": placeholder_path, "provider": "placeholder", "source": "local"}]
+                st.session_state[f"{slot}_candidates"] = candidates
+            cols = st.columns(len(candidates)) if candidates else []
+            for idx, cand in enumerate(candidates):
+                with cols[idx]:
+                    st.image(cand["url"], use_column_width=True)
+                    st.caption(cand.get("provider", "").capitalize() or f"Option {idx + 1}")
+            options = list(range(len(candidates)))
+            if not options:
+                options = [0]
+            default_index = st.session_state.get(f"{slot}_choice", 0)
+            if default_index >= len(options):
+                default_index = 0
+            st.radio(
+                "Choisir l'image",
+                options=options,
+                index=default_index,
+                key=f"{slot}_choice",
+                format_func=lambda idx: candidates[idx].get("provider", "").capitalize() or f"Option {idx + 1}",
+            )
 
         with cimg1:
-            if st.button("Chercher image pour Visite 1", key="fetch_visite1"):
-                _store_image("visite1", st.session_state.get("v1", ""))
-            data1 = st.session_state.get('visite1_data') or {}
-            path1 = data1.get("path")
-            if path1:
-                st.image(path1, width=280)
-                provider = data1.get("provider")
-                if provider and provider != "placeholder":
-                    st.caption(f"Source : {provider}")
-                else:
-                    st.caption("Source : Placeholder")
-            attempts1 = data1.get("attempts") or []
-            if attempts1:
-                provider_msgs = [
-                    f"{item['provider']} ({item['status']})"
-                    for item in attempts1
-                ]
-                st.caption(" • ".join(provider_msgs))
+            st.caption(st.session_state.get('v1') or "Sélectionnez un lieu")
+            if st.button("Charger images Visite 1", key="fetch_visite1"):
+                _load_candidates("visite1", st.session_state.get("v1", ""))
+            _display_candidates("visite1")
         with cimg2:
-            if st.button("Chercher image pour Visite 2", key="fetch_visite2"):
-                _store_image("visite2", st.session_state.get("v2", ""))
-            data2 = st.session_state.get('visite2_data') or {}
-            path2 = data2.get("path")
-            if path2:
-                st.image(path2, width=280)
-                provider = data2.get("provider")
-                if provider and provider != "placeholder":
-                    st.caption(f"Source : {provider}")
-                else:
-                    st.caption("Source : Placeholder")
-            attempts2 = data2.get("attempts") or []
-            if attempts2:
-                provider_msgs = [
-                    f"{item['provider']} ({item['status']})"
-                    for item in attempts2
-                ]
-                st.caption(" • ".join(provider_msgs))
+            st.caption(st.session_state.get('v2') or "Sélectionnez un lieu")
+            if st.button("Charger images Visite 2", key="fetch_visite2"):
+                _load_candidates("visite2", st.session_state.get("v2", ""))
+            _display_candidates("visite2")
+
         if st.button("Confirmer les images"):
-            data1 = st.session_state.get('visite1_data') or {}
-            data2 = st.session_state.get('visite2_data') or {}
-            path1 = data1.get("path")
-            path2 = data2.get("path")
-            if not (path1 and path2):
-                st.warning("Sélection incomplète…")
+            cand_list1 = st.session_state.get('visite1_candidates', [])
+            cand_list2 = st.session_state.get('visite2_candidates', [])
+            if not cand_list1 or not cand_list2:
+                st.warning("Chargez d'abord les propositions d'images pour chaque visite.")
             else:
-                st.session_state['visite1_img_path'] = path1
-                st.session_state['visite2_img_path'] = path2
-                prov1 = data1.get("provider")
-                prov2 = data2.get("provider")
-                st.session_state['visite1_provider'] = "Placeholder" if not prov1 or prov1 == "placeholder" else prov1
-                st.session_state['visite2_provider'] = "Placeholder" if not prov2 or prov2 == "placeholder" else prov2
-                st.session_state['visites_locked'] = True
-                st.success("Images confirmées (2/2). Elles seront utilisées à la génération.")
+                idx1 = st.session_state.get('visite1_choice', 0)
+                idx2 = st.session_state.get('visite2_choice', 0)
+                if idx1 >= len(cand_list1) or idx2 >= len(cand_list2):
+                    st.warning("Sélection invalide. Rechargez les images.")
+                else:
+                    cand1 = cand_list1[idx1]
+                    cand2 = cand_list2[idx2]
+                    path1 = (
+                        cand1["url"]
+                        if cand1.get("source") == "local"
+                        else download_image(cand1["url"], slugify(st.session_state.get('v1') or 'visite1'))
+                    )
+                    path2 = (
+                        cand2["url"]
+                        if cand2.get("source") == "local"
+                        else download_image(cand2["url"], slugify(st.session_state.get('v2') or 'visite2'))
+                    )
+                    if not (path1 and path2):
+                        st.warning("Téléchargement incomplet des images.")
+                    else:
+                        st.session_state['visite1_img_path'] = path1
+                        st.session_state['visite2_img_path'] = path2
+                        st.session_state['visite1_provider'] = cand1.get("provider", "wikimedia")
+                        st.session_state['visite2_provider'] = cand2.get("provider", "wikimedia")
+                        st.session_state['visites_locked'] = True
+                        st.success("Images confirmées (2/2). Elles seront utilisées à la génération.")
     st.slider("Rayon (m)", min_value=300, max_value=3000, value=st.session_state.get("radius_m", 1200), step=100, key="radius_m")
 
     # Points forts & Challenges (Slide 5)
@@ -402,10 +466,13 @@ def render(config):
             st.caption("Graphique non généré pour le moment.")
 
     # Mapping Estimation
-    metro = st.session_state.get('metro_lines_auto') or []
-    bus = st.session_state.get('bus_lines_auto') or []
-    metro_str = ", ".join(f"Ligne {x.get('ref')}" for x in metro if x.get('ref'))
-    bus_str = ", ".join(f"Bus {x.get('ref')}" for x in bus if x.get('ref'))
+    transport_pois = st.session_state.get('transport_pois', []) or []
+    transport_lines = [
+        f"{poi['title']} ({int(poi.get('distance_m', 0))} m)"
+        for poi in transport_pois
+    ]
+    metro_str = "; ".join(transport_lines[:3])
+    bus_str = "; ".join(transport_lines[3:6])
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
