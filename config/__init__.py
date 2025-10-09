@@ -1,5 +1,5 @@
-"""Configuration package for Wikimedia integrations."""
+"""Configuration package for MFY Local App integrations."""
 
-from . import wiki_settings
+from . import places_settings, wiki_settings
 
-__all__ = ["wiki_settings"]
+__all__ = ["wiki_settings", "places_settings"]
