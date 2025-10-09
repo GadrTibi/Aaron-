@@ -69,6 +69,56 @@ def _resolve_base_nightly_price() -> float:
                 continue
     raise ValueError("Paramètre 'base_nightly_price' introuvable dans l'état de l'application.")
 
+def _format_taxi_summary(items: list[dict]) -> str:
+    if not items:
+        return ""
+    entry = items[0]
+    name = entry.get("name") or "Station de taxi"
+    distance = entry.get("distance_m")
+    if distance is None:
+        return name
+    mins = int(round(distance / 80.0))
+    return f"{name} ({distance} m – {mins} min)"
+
+
+def _format_line_labels(items: list[dict], prefix: str) -> str:
+    labels: list[str] = []
+    for item in items:
+        ref = item.get("ref") or item.get("name")
+        if not ref:
+            continue
+        labels.append(f"{prefix} {ref}" if prefix else str(ref))
+    return ", ".join(labels)
+
+
+def _display_transport_caption(*debug_values: dict | None) -> None:
+    pairs = [(label, dbg) for label, dbg in zip(["taxi", "metro", "bus"], debug_values) if isinstance(dbg, dict)]
+    if not pairs:
+        return
+    mirror = None
+    parts: list[str] = []
+    for label, dbg in pairs:
+        if not mirror and dbg.get("mirror"):
+            mirror = dbg.get("mirror")
+        segment: list[str] = [label]
+        if dbg.get("duration_ms") is not None:
+            segment.append(f"{int(dbg['duration_ms'])}ms")
+        if dbg.get("items") is not None:
+            segment.append(f"{int(dbg['items'])} items")
+        status = dbg.get("status")
+        if status and status != "ok":
+            segment.append(status)
+        parts.append(" ".join(segment))
+    caption_parts: list[str] = []
+    if mirror:
+        caption_parts.append(f"mirror={mirror}")
+    caption_parts.extend(parts)
+    try:
+        st.caption("Transports: " + " | ".join(caption_parts))
+    except Exception:
+        pass
+
+
 def render(config):
     TPL_DIR = config['TPL_DIR']
     EST_TPL_DIR = config['EST_TPL_DIR']
@@ -133,12 +183,13 @@ def render(config):
         if lat is not None:
             try:
                 radius = st.session_state.get("radius_m", 1200)
-                tr = fetch_transports(lat, lon, radius_m=radius)
-                metro = list_metro_lines(lat, lon, radius_m=radius)
-                bus = list_bus_lines(lat, lon, radius_m=radius)
-                st.session_state["q_tx"] = tr.get("taxi", "")
-                st.session_state['metro_lines_auto'] = metro
-                st.session_state['bus_lines_auto'] = bus
+                taxi_items, taxi_debug = fetch_transports(lat, lon, radius_m=radius)
+                metro_items, metro_debug = list_metro_lines(lat, lon, radius_m=radius)
+                bus_items, bus_debug = list_bus_lines(lat, lon, radius_m=radius)
+                st.session_state["q_tx"] = _format_taxi_summary(taxi_items)
+                st.session_state['metro_lines_auto'] = metro_items
+                st.session_state['bus_lines_auto'] = bus_items
+                _display_transport_caption(taxi_debug, metro_debug, bus_debug)
             except Exception as e:
                 st.warning(f"Transports non chargés: {e}")
         else:
@@ -148,8 +199,8 @@ def render(config):
     taxi_txt = st.session_state.get("q_tx", "")
     metro_auto = st.session_state.get('metro_lines_auto', [])
     bus_auto = st.session_state.get('bus_lines_auto', [])
-    metro_refs = ", ".join([f"Ligne {x.get('ref')}" for x in metro_auto if x.get('ref')])
-    bus_refs = ", ".join([f"Bus {x.get('ref')}" for x in bus_auto if x.get('ref')])
+    metro_refs = _format_line_labels(metro_auto, "Ligne")
+    bus_refs = _format_line_labels(bus_auto, "Bus")
     st.write(f"Taxi : {taxi_txt or '—'}")
     st.write(f"Métro : {metro_refs or '—'}")
     st.write(f"Bus : {bus_refs or '—'}")
