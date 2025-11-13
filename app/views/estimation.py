@@ -378,9 +378,18 @@ def render(config):
     with colPF:
         point_fort_1 = st.text_input("Point fort 1", st.session_state.get("pf1", "Proche des transports"), key="pf1")
         point_fort_2 = st.text_input("Point fort 2", st.session_state.get("pf2", "Récemment rénové"), key="pf2")
+        point_fort_3 = st.text_input("Point fort 3", value=st.session_state.get("pf3", ""), key="pf3")
     with colCH:
         challenge_1 = st.text_input("Challenge 1", st.session_state.get("ch1", "Pas d’ascenseur"), key="ch1")
         challenge_2 = st.text_input("Challenge 2", st.session_state.get("ch2", "Bruit de la rue en journée"), key="ch2")
+        challenge_3 = st.text_input("Challenge 3", value=st.session_state.get("ch3", ""), key="ch3")
+
+    st.caption(
+        f"Points forts: {', '.join([v for v in [st.session_state.get('pf1'), st.session_state.get('pf2'), st.session_state.get('pf3')] if v])}"
+    )
+    st.caption(
+        f"Challenges: {', '.join([v for v in [st.session_state.get('ch1'), st.session_state.get('ch2'), st.session_state.get('ch3')] if v])}"
+    )
 
     # ---- Revenus + scénarios ----
     st.subheader("Paramètres revenus")
@@ -490,8 +499,10 @@ def render(config):
         "[[MODE_CHAUFFAGE]]": st.session_state.get('bien_chauffage',''),
         "[[POINT_FORT_1]]": st.session_state.get('pf1',''),
         "[[POINT_FORT_2]]": st.session_state.get('pf2',''),
+        "[[POINT_FORT_3]]": st.session_state.get('pf3',''),
         "[[CHALLENGE_1]]": st.session_state.get('ch1',''),
         "[[CHALLENGE_2]]": st.session_state.get('ch2',''),
+        "[[CHALLENGE_3]]": st.session_state.get('ch3',''),
         # Slide 6
         "[[PRIX_NUIT]]": f"{st.session_state.get('rn_prix',0):.0f} €",
         "[[TAUX_OCC]]": f"{st.session_state.get('rn_occ',0)} %",
