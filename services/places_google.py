@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import math
 import random
-import re
 import time
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 
 import requests
 
 
-EARTH_RADIUS_M = 6_371_000.0
 BASE = "https://places.googleapis.com/v1"
 FIELD_MASK = "places.id,places.displayName,places.primaryType,places.types,places.location,places.shortFormattedAddress"
 MAX_PER_CALL = 20
@@ -45,47 +42,114 @@ class GPlace:
     raw: dict
 
 
-class GooglePlacesError(RuntimeError):
-    """Custom error containing Google Places response details."""
+def _post_json(
+    url: str,
+    headers: dict,
+    payload: dict,
+    timeout: int = 10,
+    retries: int = 2,
+    backoff: float = 0.6,
+    jitter: float = 0.2,
+    post: Callable[..., requests.Response] | None = None,
+):
+    last = None
+    post_func = post or requests.post
+    for attempt in range(retries + 1):
+        r = post_func(url, headers=headers, json=payload, timeout=timeout)
+        if r.status_code >= 400:
+            try:
+                err = r.json().get("error", {})
+                msg = err.get("message") or r.text[:300]
+            except Exception:
+                msg = r.text[:300]
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+                delay = backoff * (2 ** attempt)
+                delay += delay * random.uniform(-jitter, jitter)
+                time.sleep(max(0.2, delay))
+                continue
+            raise RuntimeError(f"Google Places error {r.status_code}: {msg}")
+        try:
+            return r.json()
+        except Exception as e:
+            last = e
+    raise RuntimeError(f"Google Places: invalid JSON response ({last})")
 
-    def __init__(self, message: str, *, status_code: int | None = None, body: str | None = None) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.response_body = body
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    R = 6371000.0
+    from math import radians, sin, cos, sqrt, atan2
+
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
 
-def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
-    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-    return EARTH_RADIUS_M * c
+def _to_place(item: dict, origin_lat: float, origin_lon: float) -> dict:
+    name = item.get("displayName", {}).get("text") or ""
+    loc = item.get("location", {})
+    lat = loc.get("latitude")
+    lon = loc.get("longitude")
+    dist = _haversine_m(origin_lat, origin_lon, lat, lon) if (lat is not None and lon is not None) else 0.0
+    return {
+        "id": item.get("id"),
+        "name": name,
+        "lat": lat,
+        "lon": lon,
+        "types": item.get("types", []) or [],
+        "distance_m": dist,
+        "raw": item,
+    }
+
+
+def _dedup_and_sort(items: list[dict], limit: int) -> list[dict]:
+    seen = set()
+    out = []
+    for it in items:
+        pid = it.get("id")
+        key = pid or f"{it.get('name','')}:{round(it.get('lat',0),5)}:{round(it.get('lon',0),5)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    out.sort(key=lambda x: x.get("distance_m", 1e12))
+    return out[:limit]
 
 
 def dedup_and_cut(items: Iterable[GPlace], limit: int) -> list[GPlace]:
-    sorted_items = sorted(items, key=lambda p: p.distance_m)
-    seen_ids: set[str] = set()
-    seen_geo: set[tuple[str, float, float]] = set()
+    mapped: list[dict] = []
+    for place in items:
+        mapped.append(
+            {
+                "id": place.place_id or None,
+                "name": place.name,
+                "lat": place.lat,
+                "lon": place.lon,
+                "types": place.types,
+                "distance_m": place.distance_m,
+                "raw": place.raw,
+            }
+        )
+    deduped = _dedup_and_sort(mapped, limit)
     result: list[GPlace] = []
-    for place in sorted_items:
-        pid = place.place_id
-        if pid and pid in seen_ids:
+    for entry in deduped:
+        lat = entry.get("lat")
+        lon = entry.get("lon")
+        if lat is None or lon is None:
             continue
-        geo_key = (place.name.strip().lower(), round(place.lat, 6), round(place.lon, 6))
-        if geo_key in seen_geo:
-            continue
-        if pid:
-            seen_ids.add(pid)
-        seen_geo.add(geo_key)
-        result.append(place)
-        if limit and len(result) >= limit:
-            break
+        name = entry.get("name") or entry.get("id") or "Sans nom"
+        result.append(
+            GPlace(
+                name=name,
+                place_id=str(entry.get("id") or ""),
+                lat=float(lat),
+                lon=float(lon),
+                distance_m=float(entry.get("distance_m", 0.0)),
+                types=list(entry.get("types", []) or []),
+                raw=entry.get("raw", {}),
+            )
+        )
     return result
-
-
-def _clamp_nearby_types(types: list[str]) -> list[str]:
-    return [t for t in types if t in ALLOWED_TYPES_NEARBY]
 
 
 class GooglePlacesService:
@@ -95,90 +159,15 @@ class GooglePlacesService:
         self.api_key = api_key
         self.session = session or requests.Session()
 
-    def _post(self, endpoint: str, payload: dict) -> dict:
-        url = f"{BASE}/{endpoint}"
-        headers = {
+    def _headers(self) -> dict:
+        return {
             "X-Goog-Api-Key": self.api_key,
             "X-Goog-FieldMask": FIELD_MASK,
             "Content-Type": "application/json",
         }
-        attempts = 3
-        base_delay = 0.8
-        for attempt in range(attempts):
-            try:
-                response = self.session.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=10,
-                )
-            except requests.RequestException as exc:
-                if attempt < attempts - 1:
-                    delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.5)
-                    time.sleep(delay)
-                    continue
-                raise GooglePlacesError(f"Google Places request failed: {exc}") from exc
 
-            status = response.status_code
-            if status < 400:
-                try:
-                    return response.json()
-                except ValueError as exc:
-                    raise GooglePlacesError(
-                        f"Google Places error {status}: invalid JSON response",
-                        status_code=status,
-                        body=response.text,
-                    ) from exc
-
-            retryable = status == 429 or 500 <= status < 600
-            if retryable and attempt < attempts - 1:
-                delay = base_delay * (2 ** attempt) + random.uniform(0.0, 0.5)
-                time.sleep(delay)
-                continue
-
-            message = self._extract_error_message(response)
-            body_text = (response.text or "").strip()[:300]
-            raise GooglePlacesError(
-                f"Google Places error {status}: {message}",
-                status_code=status,
-                body=body_text,
-            )
-
-        raise GooglePlacesError("Google Places error: max retries exceeded")
-
-    @staticmethod
-    def _extract_error_message(response: requests.Response) -> str:
-        try:
-            data = response.json()
-        except ValueError:
-            text = (response.text or "").strip()
-            return text[:300] if text else "Unknown error"
-        if isinstance(data, dict):
-            error = data.get("error")
-            if isinstance(error, dict):
-                message = error.get("message")
-                if isinstance(message, str) and message.strip():
-                    return message.strip()
-        text = (response.text or "").strip()
-        if text:
-            return text[:300]
-        return "Unknown error"
-
-    @staticmethod
-    def _parse_unsupported_types(error_text: str) -> set[str]:
-        if not error_text:
-            return set()
-        pattern = re.compile(r"Unsupported types:\s*([^\n\r.;]+)")
-        match = pattern.search(error_text)
-        if not match:
-            return set()
-        types_part = match.group(1)
-        types: set[str] = set()
-        for chunk in re.split(r"[,\s]+", types_part):
-            chunk = chunk.strip().strip("[]'\"")
-            if chunk:
-                types.add(chunk)
-        return types
+    def _post(self, url: str, payload: dict) -> dict:
+        return _post_json(url, self._headers(), payload, post=self.session.post)
 
     def _search_nearby(
         self,
@@ -188,69 +177,33 @@ class GooglePlacesService:
         included_types: list[str],
         max_results: int,
     ) -> list[dict]:
-        valid_types = _clamp_nearby_types([t.strip() for t in included_types if isinstance(t, str)])
-        if not valid_types:
+        types = [t for t in included_types if isinstance(t, str)]
+        types = [t.strip() for t in types if t.strip()]
+        types = [t for t in types if t in ALLOWED_TYPES_NEARBY]
+        if not types:
             raise ValueError("No valid includedTypes for Nearby")
 
-        target = max(0, int(max_results))
-        if target <= 0:
-            return []
-
-        pending_types: list[str] = list(dict.fromkeys(valid_types))
-        collected: list[dict] = []
-        seen_ids: set[str] = set()
-
-        while pending_types and len(collected) < target:
-            current_type = pending_types.pop(0)
-            remaining = target - len(collected)
+        url = f"{BASE}/places:searchNearby"
+        remaining = max(0, int(max_results))
+        results: list[dict] = []
+        for t in dict.fromkeys(types):
             if remaining <= 0:
                 break
-            take = min(MAX_PER_CALL, remaining)
-            allow_retry = True
-            skip_type = False
-            while True:
-                payload = {
-                    "includedTypes": [current_type],
-                    "locationRestriction": {
-                        "circle": {
-                            "center": {"latitude": lat, "longitude": lon},
-                            "radius": float(radius_m),
-                        }
-                    },
-                    "maxResultCount": take,
-                    "languageCode": "fr",
-                }
-                try:
-                    data = self._post("places:searchNearby", payload)
-                except GooglePlacesError as exc:
-                    unsupported = set()
-                    if exc.status_code == 400:
-                        error_text = "\n".join(filter(None, [str(exc), exc.response_body]))
-                        unsupported = self._parse_unsupported_types(error_text)
-                    if unsupported and allow_retry:
-                        allow_retry = False
-                        pending_types = [t for t in pending_types if t not in unsupported]
-                        if current_type in unsupported:
-                            skip_type = True
-                            break
-                        continue
-                    raise
-                else:
-                    places = data.get("places", []) if isinstance(data, dict) else []
-                    for place in places or []:
-                        pid = place.get("id")
-                        if pid and pid in seen_ids:
-                            continue
-                        if pid:
-                            seen_ids.add(pid)
-                        collected.append(place)
-                        if len(collected) >= target:
-                            break
-                    break
-            if skip_type:
-                continue
-
-        return collected
+            payload = {
+                "includedTypes": [t],
+                "locationRestriction": {
+                    "circle": {
+                        "center": {"latitude": lat, "longitude": lon},
+                        "radius": float(radius_m),
+                    }
+                },
+                "maxResultCount": min(MAX_PER_CALL, remaining),
+                "languageCode": "fr",
+            }
+            data = self._post(url, payload)
+            results.extend(data.get("places", []) if isinstance(data, dict) else [])
+            remaining = max(0, remaining - MAX_PER_CALL)
+        return results
 
     def _search_text(
         self,
@@ -268,6 +221,7 @@ class GooglePlacesService:
         if target <= 0:
             return []
 
+        url = f"{BASE}/places:searchText"
         payload = {
             "textQuery": query,
             "locationBias": {
@@ -279,53 +233,32 @@ class GooglePlacesService:
             "maxResultCount": min(MAX_PER_CALL, target),
             "languageCode": "fr",
         }
-        try:
-            data = self._post("places:searchText", payload)
-        except GooglePlacesError as exc:
-            if exc.status_code and exc.status_code >= 400:
-                raise RuntimeError(str(exc)) from exc
-            raise
-        return data.get("places", []) or []
+        data = self._post(url, payload)
+        return data.get("places", []) if isinstance(data, dict) else []
 
     @staticmethod
-    def _to_places(lat: float, lon: float, places: Iterable[dict]) -> list[GPlace]:
-        results: list[GPlace] = []
-        for place in places:
-            if not isinstance(place, dict):
+    def _map_results(lat: float, lon: float, places: Iterable[dict], limit: int) -> list[GPlace]:
+        mapped = [_to_place(p, lat, lon) for p in places if isinstance(p, dict)]
+        deduped = _dedup_and_sort(mapped, limit)
+        result: list[GPlace] = []
+        for item in deduped:
+            lat_val = item.get("lat")
+            lon_val = item.get("lon")
+            if lat_val is None or lon_val is None:
                 continue
-            display_name = place.get("displayName")
-            name: str | None = None
-            if isinstance(display_name, dict):
-                text = display_name.get("text")
-                if isinstance(text, str) and text.strip():
-                    name = text.strip()
-            if not name:
-                fallback = place.get("name") or place.get("id") or "Sans nom"
-                name = str(fallback)
-            location = place.get("location") or {}
-            plat = location.get("latitude")
-            plon = location.get("longitude")
-            if plat is None or plon is None:
-                continue
-            try:
-                plat_f = float(plat)
-                plon_f = float(plon)
-            except (TypeError, ValueError):
-                continue
-            distance = _haversine(lat, lon, plat_f, plon_f)
-            types = [t for t in (place.get("types") or []) if isinstance(t, str)]
-            results.append(
+            name = item.get("name") or item.get("id") or "Sans nom"
+            result.append(
                 GPlace(
                     name=name,
-                    place_id=str(place.get("id", "")),
-                    lat=plat_f,
-                    lon=plon_f,
-                    distance_m=distance,
-                    types=types,
-                    raw=place,
+                    place_id=str(item.get("id") or ""),
+                    lat=float(lat_val),
+                    lon=float(lon_val),
+                    distance_m=float(item.get("distance_m", 0.0)),
+                    types=list(item.get("types", []) or []),
+                    raw=item.get("raw", {}),
                 )
             )
-        return results
+        return result
 
     def list_incontournables(
         self,
@@ -355,8 +288,7 @@ class GooglePlacesService:
             included_types=types,
             max_results=limit * 2,
         )
-        places = self._to_places(lat, lon, raw_places)
-        return dedup_and_cut(places, limit)
+        return self._map_results(lat, lon, raw_places, limit)
 
     def list_spots(
         self,
@@ -392,13 +324,8 @@ class GooglePlacesService:
             "plage beach",
             max_results=limit,
         )
-        places = (
-            self._to_places(lat, lon, r1)
-            + self._to_places(lat, lon, r2)
-            + self._to_places(lat, lon, r3)
-            + self._to_places(lat, lon, r4)
-        )
-        return dedup_and_cut(places, limit)
+        raw = r1 + r2 + r3 + r4
+        return self._map_results(lat, lon, raw, limit)
 
     def list_visits(
         self,
@@ -441,13 +368,8 @@ class GooglePlacesService:
             "château",
             max_results=limit,
         )
-        places = (
-            self._to_places(lat, lon, r1)
-            + self._to_places(lat, lon, r2)
-            + self._to_places(lat, lon, r3)
-            + self._to_places(lat, lon, r4)
-        )
-        return dedup_and_cut(places, limit)
+        raw = r1 + r2 + r3 + r4
+        return self._map_results(lat, lon, raw, limit)
 
 
-__all__ = ["GPlace", "GooglePlacesService", "dedup_and_cut", "GooglePlacesError"]
+__all__ = ["GPlace", "GooglePlacesService", "dedup_and_cut"]
