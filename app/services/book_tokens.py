@@ -2,6 +2,27 @@
 from __future__ import annotations
 
 
+def _collect_line_refs(items: list) -> list[str]:
+    refs: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if isinstance(item, dict):
+            value = item.get("ref") or item.get("name")
+        elif isinstance(item, str):
+            value = item
+        else:
+            value = str(item) if item is not None else ""
+        ref = str(value).strip()
+        if not ref:
+            continue
+        key = ref.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(ref)
+    return refs
+
+
 def build_book_mapping(ss: dict) -> dict:
     """Build token->value mapping for the Book PPTX.
 
@@ -24,8 +45,10 @@ def build_book_mapping(ss: dict) -> dict:
     bus_auto = ss.get('bus_lines_auto') or []
     taxi_txt = ss.get('q_tx', "")
 
-    metro_str = ", ".join([f"Ligne {x.get('ref')}" for x in metro_auto if x.get('ref')])
-    bus_str   = ", ".join([f"Bus {x.get('ref')}"   for x in bus_auto   if x.get('ref')])
+    metro_refs = _collect_line_refs(metro_auto)
+    bus_refs = _collect_line_refs(bus_auto)
+    metro_str = ", ".join(metro_refs)
+    bus_str = ", ".join(bus_refs)
 
     mapping = {
         # Adresse/Transports (Slide 4)

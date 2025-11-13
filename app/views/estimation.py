@@ -1,20 +1,16 @@
 import os
-from typing import Iterable
+from typing import Iterable, Optional
 
 import streamlit as st
 
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.plots import build_estimation_histo
 from app.services.pptx_fill import generate_estimation_pptx
-from app.services.poi import (
-    fetch_transports,
-    list_metro_lines,
-    list_bus_lines,
-)
 from app.services.geocode import geocode_address
 from app.services.map_image import build_static_map
 from services.places_google import GPlace, GooglePlacesService
 from services.wiki_images import ImageCandidate, WikiImageService
+from services.transports_v3 import TransportService
 
 from .settings_keys import read_local_secret
 from .utils import _sanitize_filename, list_templates
@@ -69,25 +65,37 @@ def _resolve_base_nightly_price() -> float:
                 continue
     raise ValueError("Paramètre 'base_nightly_price' introuvable dans l'état de l'application.")
 
-def _format_taxi_summary(items: list[dict]) -> str:
-    if not items:
-        return ""
-    entry = items[0]
-    name = entry.get("name") or "Station de taxi"
-    distance = entry.get("distance_m")
-    if distance is None:
-        return name
-    mins = int(round(distance / 80.0))
-    return f"{name} ({distance} m – {mins} min)"
-
-
-def _format_line_labels(items: list[dict], prefix: str) -> str:
-    labels: list[str] = []
+def _collect_line_refs(items: list, limit: Optional[int] = None) -> list[str]:
+    refs: list[str] = []
+    seen: set[str] = set()
     for item in items:
-        ref = item.get("ref") or item.get("name")
+        if isinstance(item, dict):
+            value = item.get("ref") or item.get("name")
+        elif isinstance(item, str):
+            value = item
+        else:
+            value = str(item) if item is not None else ""
+        ref = str(value).strip()
         if not ref:
             continue
-        labels.append(f"{prefix} {ref}" if prefix else str(ref))
+        key = ref.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(ref)
+        if limit is not None and len(refs) >= limit:
+            break
+    return refs
+
+
+def _format_line_labels(items: list, prefix: str) -> str:
+    refs = _collect_line_refs(items)
+    labels: list[str] = []
+    for ref in refs:
+        if prefix and not ref.lower().startswith(prefix.lower()):
+            labels.append(f"{prefix} {ref}")
+        else:
+            labels.append(ref)
     return ", ".join(labels)
 
 
@@ -182,20 +190,25 @@ def render(config):
         lat, lon = _geocode_main_address()
         if lat is not None:
             try:
-                radius = st.session_state.get("radius_m", 1200)
-                taxi_items, taxi_debug = fetch_transports(lat, lon, radius_m=radius)
-                metro_items, metro_debug = list_metro_lines(lat, lon, radius_m=radius)
-                bus_items, bus_debug = list_bus_lines(lat, lon, radius_m=radius)
-                st.session_state["q_tx"] = _format_taxi_summary(taxi_items)
-                st.session_state['metro_lines_auto'] = metro_items
-                st.session_state['bus_lines_auto'] = bus_items
-                _display_transport_caption(taxi_debug, metro_debug, bus_debug)
+                radius_raw = st.session_state.get("radius_m", 1200)
+                try:
+                    radius = int(radius_raw)
+                except (TypeError, ValueError):
+                    radius = 1200
+                service = TransportService()
+                tr = service.get(lat, lon, radius_m=radius)
+                st.session_state["q_tx"] = ", ".join(tr.taxis)
+                st.session_state["metro_lines_auto"] = tr.metro_lines
+                st.session_state["bus_lines_auto"] = tr.bus_lines
+                st.session_state["transport_providers"] = tr.provider_used
             except Exception as e:
                 st.warning(f"Transports non chargés: {e}")
+                st.session_state['transport_providers'] = {}
         else:
             st.session_state["q_tx"] = ""
             st.session_state['metro_lines_auto'] = []
             st.session_state['bus_lines_auto'] = []
+            st.session_state['transport_providers'] = {}
     taxi_txt = st.session_state.get("q_tx", "")
     metro_auto = st.session_state.get('metro_lines_auto', [])
     bus_auto = st.session_state.get('bus_lines_auto', [])
@@ -204,6 +217,15 @@ def render(config):
     st.write(f"Taxi : {taxi_txt or '—'}")
     st.write(f"Métro : {metro_refs or '—'}")
     st.write(f"Bus : {bus_refs or '—'}")
+    providers = st.session_state.get('transport_providers')
+    if isinstance(providers, dict) and providers:
+        st.caption(
+            "source métro: {metro} | bus: {bus} | taxi: {taxi}".format(
+                metro=providers.get("metro", "-"),
+                bus=providers.get("bus", "-"),
+                taxi=providers.get("taxi", "-"),
+            )
+        )
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
@@ -475,8 +497,10 @@ def render(config):
     # Mapping Estimation
     metro = st.session_state.get('metro_lines_auto') or []
     bus = st.session_state.get('bus_lines_auto') or []
-    metro_str = ", ".join(f"Ligne {x.get('ref')}" for x in metro if x.get('ref'))
-    bus_str = ", ".join(f"Bus {x.get('ref')}" for x in bus if x.get('ref'))
+    metro_refs_tokens = _collect_line_refs(metro, limit=3)
+    bus_refs_tokens = _collect_line_refs(bus, limit=3)
+    metro_str = ", ".join(metro_refs_tokens)
+    bus_str = ", ".join(bus_refs_tokens)
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
