@@ -24,8 +24,24 @@ def build_book_mapping(ss: dict) -> dict:
     bus_auto = ss.get('bus_lines_auto') or []
     taxi_txt = ss.get('q_tx', "")
 
-    metro_str = ", ".join([f"Ligne {x.get('ref')}" for x in metro_auto if x.get('ref')])
-    bus_str   = ", ".join([f"Bus {x.get('ref')}"   for x in bus_auto   if x.get('ref')])
+    def _format_lines(items, prefix: str) -> str:
+        labels: list[str] = []
+        for item in items:
+            if isinstance(item, str):
+                labels.append(item)
+                continue
+            if isinstance(item, dict):
+                ref = item.get("ref")
+                name = item.get("name")
+                if ref:
+                    labels.append(f"{prefix} {ref}" if prefix else str(ref))
+                    continue
+                if name:
+                    labels.append(str(name))
+        return ", ".join(labels)
+
+    metro_str = _format_lines(metro_auto, "Ligne")
+    bus_str = _format_lines(bus_auto, "Bus")
 
     mapping = {
         # Adresse/Transports (Slide 4)

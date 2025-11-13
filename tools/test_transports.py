@@ -35,16 +35,24 @@ def _print_debug(label: str, debug: Dict[str, Any]) -> None:
     print(f"{label}: {' | '.join(parts)}")
 
 
-def _print_items(label: str, items: List[Dict[str, Any]], key: str = "name", limit: int | None = None) -> None:
+def _print_items(label: str, items: List[Any], key: str = "name", limit: int | None = None) -> None:
     print(f"{label} ({len(items)} items)")
     count = 0
     for item in items:
         if limit is not None and count >= limit:
             break
-        name = item.get(key) or item.get("name") or "?"
-        dist = item.get("distance_m")
-        extra = f" - {dist} m" if dist is not None else ""
-        print(f"  - {name}{extra}")
+        if isinstance(item, str):
+            print(f"  - {item}")
+            count += 1
+            continue
+        if isinstance(item, dict):
+            name = item.get(key) or item.get("name") or "?"
+            dist = item.get("distance_m")
+            extra = f" - {dist} m" if dist is not None else ""
+            print(f"  - {name}{extra}")
+            count += 1
+            continue
+        print(f"  - {item}")
         count += 1
 
 
@@ -56,7 +64,9 @@ def main() -> None:
     args = parser.parse_args()
 
     taxis, taxi_debug = fetch_transports(args.lat, args.lon, radius_m=args.radius)
-    metros, metro_debug = list_metro_lines(args.lat, args.lon, radius_m=args.radius)
+    metros, metro_debug = list_metro_lines(
+        args.lat, args.lon, radius_m=args.radius, include_debug=True
+    )
     buses, bus_debug = list_bus_lines(args.lat, args.lon, radius_m=args.radius)
 
     _print_debug("Taxi", taxi_debug)
@@ -70,4 +80,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 1:
+        print(list_metro_lines(48.8843, 2.3271, 1500))
+    else:
+        main()
