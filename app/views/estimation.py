@@ -479,12 +479,12 @@ def render(config):
                 stored_mandat_date = None
     if not isinstance(stored_mandat_date, _dt.date):
         stored_mandat_date = _dt.date.today()
+    st.session_state["mandat_date"] = stored_mandat_date
     date_val = st.date_input(
         "Jour de signature du mandat",
-        value=stored_mandat_date,
+        value=st.session_state["mandat_date"],
         key="mandat_date",
     )
-    st.session_state["mandat_date"] = date_val
 
     def _weekday_fr(d: _dt.date) -> str:
         jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
