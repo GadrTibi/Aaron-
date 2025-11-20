@@ -1,3 +1,4 @@
+import datetime as _dt
 import os
 from typing import Iterable, Optional
 
@@ -9,7 +10,11 @@ from app.services.pptx_fill import generate_estimation_pptx
 from app.services.geocode import geocode_address
 from app.services.map_image import build_static_map
 from services.places_google import GPlace, GooglePlacesService
-from services.wiki_images import ImageCandidate, WikiImageService
+from services.wiki_images import (
+    ImageCandidate,
+    WikiImageService,
+    save_uploaded_visit_image,
+)
 from services.transports_v3 import TransportService
 
 from .settings_keys import read_local_secret
@@ -318,10 +323,22 @@ def render(config):
     new_v1 = st.session_state.get("v1", "")
     new_v2 = st.session_state.get("v2", "")
     if new_v1 != prev_v1:
-        for key in ("visite1_candidates", "visite1_choice", "visite1_img_path", "visite1_provider"):
+        for key in (
+            "visite1_candidates",
+            "visite1_choice",
+            "visite1_img_path",
+            "visite1_provider",
+            "visite1_uploaded_path",
+        ):
             st.session_state.pop(key, None)
     if new_v2 != prev_v2:
-        for key in ("visite2_candidates", "visite2_choice", "visite2_img_path", "visite2_provider"):
+        for key in (
+            "visite2_candidates",
+            "visite2_choice",
+            "visite2_img_path",
+            "visite2_provider",
+            "visite2_uploaded_path",
+        ):
             st.session_state.pop(key, None)
 
     st.session_state["visits_lookup"] = {place.name: place for place in visits_items}
@@ -331,7 +348,10 @@ def render(config):
 
     def _render_visit_column(slot: str, title_key: str, column) -> None:
         title_value = st.session_state.get(title_key, "")
+        uploaded_key = "visite1_uploaded_path" if slot == "visite1" else "visite2_uploaded_path"
+        upload_widget_key = "visit1_upload" if slot == "visite1" else "visit2_upload"
         with column:
+            preview_inline = False
             st.markdown(f"**{('Visite 1' if slot == 'visite1' else 'Visite 2')}**")
             if st.button(f"Trouver images {('Visite 1' if slot == 'visite1' else 'Visite 2')}", key=f"find_{slot}"):
                 if not title_value:
@@ -373,13 +393,55 @@ def render(config):
                         st.session_state[f"{slot}_provider"] = chosen.source or "Wikimedia"
                         st.success("Image enregistrée.")
 
+            if title_value:
+                up_file = st.file_uploader(
+                    f"Importer une photo pour {'Visite 1' if slot == 'visite1' else 'Visite 2'} (PNG/JPG)",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    key=upload_widget_key,
+                )
+                if up_file is not None:
+                    try:
+                        upload_path = save_uploaded_visit_image(
+                            up_file,
+                            title_value or ("Visite 1" if slot == "visite1" else "Visite 2"),
+                            slot="v1" if slot == "visite1" else "v2",
+                        )
+                    except Exception as exc:
+                        st.warning(f"Échec import photo {'Visite 1' if slot == 'visite1' else 'Visite 2'}: {exc}")
+                    else:
+                        st.session_state[uploaded_key] = upload_path
+                        st.session_state[f"{slot}_provider"] = "Photo personnalisée"
+                        st.image(
+                            upload_path,
+                            caption=f"Photo personnalisée - {'Visite 1' if slot == 'visite1' else 'Visite 2'}",
+                            use_column_width=True,
+                        )
+                        st.success(
+                            f"Photo importée pour {'Visite 1' if slot == 'visite1' else 'Visite 2'} (prioritaire)."
+                        )
+                        preview_inline = True
+
+            uploaded_path = st.session_state.get(uploaded_key)
             img_path = st.session_state.get(f"{slot}_img_path")
-            if img_path:
-                st.image(img_path, width=260)
-                provider = st.session_state.get(f"{slot}_provider") or "Wikimedia"
-                st.caption(f"Source : {provider}")
+            preview_path = uploaded_path or img_path
+            if preview_path:
+                if not preview_inline:
+                    st.image(
+                        preview_path,
+                        width=None if uploaded_path else 260,
+                        use_column_width=uploaded_path is not None,
+                    )
+                    if uploaded_path:
+                        st.caption("Photo personnalisée importée")
+                    else:
+                        provider = st.session_state.get(f"{slot}_provider") or "Wikimedia"
+                        st.caption(f"Source : {provider}")
                 if st.button("Réinitialiser l'image", key=f"reset_{slot}"):
-                    for key in (f"{slot}_img_path", f"{slot}_provider"):
+                    for key in (
+                        f"{slot}_img_path",
+                        f"{slot}_provider",
+                        uploaded_key,
+                    ):
                         st.session_state.pop(key, None)
 
     _render_visit_column("visite1", "v1", col_v1)
@@ -405,6 +467,31 @@ def render(config):
         challenge_1 = st.text_input("Challenge 1", st.session_state.get("ch1", "Pas d’ascenseur"), key="ch1")
         challenge_2 = st.text_input("Challenge 2", st.session_state.get("ch2", "Bruit de la rue en journée"), key="ch2")
         challenge_3 = st.text_input("Challenge 3", value=st.session_state.get("ch3", ""), key="ch3")
+
+    stored_mandat_date = st.session_state.get("mandat_date")
+    if isinstance(stored_mandat_date, str):
+        try:
+            stored_mandat_date = _dt.datetime.strptime(stored_mandat_date, "%d/%m/%Y").date()
+        except ValueError:
+            try:
+                stored_mandat_date = _dt.datetime.strptime(stored_mandat_date, "%Y-%m-%d").date()
+            except ValueError:
+                stored_mandat_date = None
+    if not isinstance(stored_mandat_date, _dt.date):
+        stored_mandat_date = _dt.date.today()
+    date_val = st.date_input(
+        "Jour de signature du mandat",
+        value=stored_mandat_date,
+        key="mandat_date",
+    )
+    st.session_state["mandat_date"] = date_val
+
+    def _weekday_fr(d: _dt.date) -> str:
+        jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+        return jours[d.weekday()]
+
+    st.session_state["mandat_jour_str"] = _weekday_fr(date_val)
+    st.session_state["mandat_date_str"] = date_val.strftime("%d/%m/%Y")
 
     st.caption(
         f"Points forts: {', '.join([v for v in [st.session_state.get('pf1'), st.session_state.get('pf2'), st.session_state.get('pf3')] if v])}"
@@ -527,6 +614,8 @@ def render(config):
         "[[CHALLENGE_1]]": st.session_state.get('ch1',''),
         "[[CHALLENGE_2]]": st.session_state.get('ch2',''),
         "[[CHALLENGE_3]]": st.session_state.get('ch3',''),
+        "[[MANDAT_JOUR_SIGNATURE]]": st.session_state.get("mandat_jour_str", ""),
+        "[[MANDAT_DATE_SIGNATURE]]": st.session_state.get("mandat_date_str", ""),
         # Slide 6
         "[[PRIX_NUIT]]": f"{st.session_state.get('rn_prix',0):.0f} €",
         "[[TAUX_OCC]]": f"{st.session_state.get('rn_occ',0)} %",
@@ -541,12 +630,12 @@ def render(config):
 
     # Images for VISITE_1/2 (from confirmed paths)
     image_by_shape = {}
-    p1 = st.session_state.get('visite1_img_path')
-    p2 = st.session_state.get('visite2_img_path')
-    if p1:
-        image_by_shape["VISITE_1_MASK"] = p1
-    if p2:
-        image_by_shape["VISITE_2_MASK"] = p2
+    path_v1 = st.session_state.get("visite1_uploaded_path") or st.session_state.get("visite1_img_path")
+    path_v2 = st.session_state.get("visite2_uploaded_path") or st.session_state.get("visite2_img_path")
+    if path_v1:
+        image_by_shape["VISITE_1_MASK"] = path_v1
+    if path_v2:
+        image_by_shape["VISITE_2_MASK"] = path_v2
 
     # === MAP ===
     lat = st.session_state.get("geo_lat")

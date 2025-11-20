@@ -8,6 +8,7 @@ from pptx.util import Inches
 from PIL import Image
 
 from app.services.pptx_images import inject_tagged_image
+from services.pptx_utils import apply_address_link
 
 LOGGER = logging.getLogger(__name__)
 
@@ -159,6 +160,11 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
     prs = Presentation(template_path)
     for slide in prs.slides:
         replace_text_preserving_style(slide.shapes, mapping)
+    address_text = ""
+    if mapping:
+        address_text = mapping.get("[[ADRESSE]]", "")
+    if address_text:
+        apply_address_link(prs, address_text)
     if image_by_shape:
         for shape_name, img_path in image_by_shape.items():
             if not img_path:
@@ -185,6 +191,11 @@ def generate_book_pptx(template_path: str, output_path: str, mapping: Dict[str, 
     prs = Presentation(template_path)
     for slide in prs.slides:
         replace_text_preserving_style(slide.shapes, mapping)
+    address_text = ""
+    if mapping:
+        address_text = mapping.get("[[ADRESSE]]", "")
+    if address_text:
+        apply_address_link(prs, address_text)
 
     if image_by_shape:
         for shape_name, img_path in image_by_shape.items():
