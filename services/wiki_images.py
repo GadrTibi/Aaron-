@@ -17,6 +17,39 @@ from config import wiki_settings
 
 logger = logging.getLogger(__name__)
 
+VISITS_DIR = Path("out/images/visits")
+
+
+def _slug(s: str) -> str:
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s, flags=re.I)
+    return re.sub(r"-{2,}", "-", s).strip("-")
+
+
+def save_uploaded_visit_image(file, title: str, slot: str) -> str:
+    """Persist an uploaded visit image to disk and return its path."""
+
+    VISITS_DIR.mkdir(parents=True, exist_ok=True)
+    safe_title = title or "visite"
+    base = f"{_slug(safe_title)}-{slot}-{int(time.time())}"
+    out_png = VISITS_DIR / f"{base}.png"
+    if hasattr(file, "seek"):
+        file.seek(0)
+    try:
+        img = Image.open(file)
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGB")
+        img.save(out_png, format="PNG", optimize=True)
+    except Exception:
+        if hasattr(file, "seek"):
+            file.seek(0)
+        data = file.read() if hasattr(file, "read") else None
+        if not data:
+            raise
+        with open(out_png, "wb") as fh:
+            fh.write(data)
+    return str(out_png)
+
 
 @dataclass(slots=True)
 class ImageCandidate:
