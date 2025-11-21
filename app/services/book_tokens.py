@@ -53,6 +53,7 @@ def build_book_mapping(ss: dict) -> dict:
     mapping = {
         # Adresse/Transports (Slide 4)
         "[[ADRESSE]]": adresse,
+        "[[BOOK_ADRESSE]]": adresse,
 
         # Convention “Estimation” pour les transports
         "[[TRANSPORT_TAXI_TEXTE]]": taxi_txt,
