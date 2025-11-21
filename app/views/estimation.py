@@ -8,6 +8,7 @@ from app.services.plots import build_estimation_histo
 from app.services.pptx_fill import generate_estimation_pptx
 from app.services.geocode import geocode_address
 from app.services.map_image import build_static_map
+from services.image_uploads import save_uploaded_image
 from services.places_google import GPlace, GooglePlacesService
 from services.wiki_images import ImageCandidate, WikiImageService
 from services.transports_v3 import TransportService
@@ -318,10 +319,22 @@ def render(config):
     new_v1 = st.session_state.get("v1", "")
     new_v2 = st.session_state.get("v2", "")
     if new_v1 != prev_v1:
-        for key in ("visite1_candidates", "visite1_choice", "visite1_img_path", "visite1_provider"):
+        for key in (
+            "visite1_candidates",
+            "visite1_choice",
+            "visite1_img_path",
+            "visite1_provider",
+            "visite1_uploaded_path",
+        ):
             st.session_state.pop(key, None)
     if new_v2 != prev_v2:
-        for key in ("visite2_candidates", "visite2_choice", "visite2_img_path", "visite2_provider"):
+        for key in (
+            "visite2_candidates",
+            "visite2_choice",
+            "visite2_img_path",
+            "visite2_provider",
+            "visite2_uploaded_path",
+        ):
             st.session_state.pop(key, None)
 
     st.session_state["visits_lookup"] = {place.name: place for place in visits_items}
@@ -346,6 +359,7 @@ def render(config):
                         st.session_state[f"{slot}_candidates"] = [cand.to_dict() for cand in candidates]
                         st.session_state.pop(f"{slot}_choice", None)
 
+            upload_state_key = f"{slot}_uploaded_path"
             candidates = _restore_candidates(f"{slot}_candidates")
             if candidates:
                 options = list(range(len(candidates)))
@@ -373,13 +387,35 @@ def render(config):
                         st.session_state[f"{slot}_provider"] = chosen.source or "Wikimedia"
                         st.success("Image enregistrée.")
 
+            st.markdown("**Ou importer votre propre photo :**")
+            uploaded_file = st.file_uploader(
+                "Image pour Visite 1" if slot == "visite1" else "Image pour Visite 2",
+                type=["png", "jpg", "jpeg", "webp"],
+                key=f"{slot}_upload",
+            )
+
+            if uploaded_file is not None:
+                try:
+                    saved_path = save_uploaded_image(uploaded_file, prefix=slot)
+                except ValueError as exc:
+                    st.warning(str(exc))
+                except Exception as exc:  # pragma: no cover - safety net for runtime errors
+                    st.warning(f"Échec de l'enregistrement: {exc}")
+                else:
+                    st.session_state[upload_state_key] = saved_path
+                    st.session_state[f"{slot}_provider"] = "image importée"
+                    uploaded_path = saved_path
+                    st.caption("Image importée enregistrée.")
+
+            uploaded_path = st.session_state.get(upload_state_key)
             img_path = st.session_state.get(f"{slot}_img_path")
-            if img_path:
-                st.image(img_path, width=260)
-                provider = st.session_state.get(f"{slot}_provider") or "Wikimedia"
+            final_preview = uploaded_path or img_path
+            if final_preview:
+                st.image(final_preview, width=260)
+                provider = "image importée" if uploaded_path else (st.session_state.get(f"{slot}_provider") or "Wikimedia")
                 st.caption(f"Source : {provider}")
                 if st.button("Réinitialiser l'image", key=f"reset_{slot}"):
-                    for key in (f"{slot}_img_path", f"{slot}_provider"):
+                    for key in (f"{slot}_img_path", f"{slot}_provider", upload_state_key):
                         st.session_state.pop(key, None)
 
     _render_visit_column("visite1", "v1", col_v1)
@@ -539,14 +575,20 @@ def render(config):
         "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",
     }
 
-    # Images for VISITE_1/2 (from confirmed paths)
+    # Images for VISITE_1/2 (from confirmed paths or uploaded files)
     image_by_shape = {}
+    v1_uploaded = st.session_state.get("visite1_uploaded_path")
+    v2_uploaded = st.session_state.get("visite2_uploaded_path")
     p1 = st.session_state.get('visite1_img_path')
     p2 = st.session_state.get('visite2_img_path')
-    if p1:
-        image_by_shape["VISITE_1_MASK"] = p1
-    if p2:
-        image_by_shape["VISITE_2_MASK"] = p2
+
+    v1_final = v1_uploaded or p1
+    v2_final = v2_uploaded or p2
+
+    if v1_final:
+        image_by_shape["VISITE_1_MASK"] = v1_final
+    if v2_final:
+        image_by_shape["VISITE_2_MASK"] = v2_final
 
     # === MAP ===
     lat = st.session_state.get("geo_lat")
