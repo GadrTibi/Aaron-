@@ -2,12 +2,14 @@ import logging
 import os
 import re
 from typing import Dict, Optional, List, Tuple
+from urllib.parse import quote_plus
 
 from pptx import Presentation
 from pptx.util import Inches
 from PIL import Image
 
 from app.services.pptx_images import inject_tagged_image
+from services.pptx_links import add_hyperlink_to_text
 
 LOGGER = logging.getLogger(__name__)
 
@@ -185,6 +187,13 @@ def generate_book_pptx(template_path: str, output_path: str, mapping: Dict[str, 
     prs = Presentation(template_path)
     for slide in prs.slides:
         replace_text_preserving_style(slide.shapes, mapping)
+
+    for token in ("[[ADRESSE]]", "[[BOOK_ADRESSE]]"):
+        adresse = mapping.get(token, "").strip()
+        if not adresse:
+            continue
+        maps_url = "https://www.google.com/maps/search/?api=1&query=" + quote_plus(adresse)
+        add_hyperlink_to_text(prs, adresse, maps_url)
 
     if image_by_shape:
         for shape_name, img_path in image_by_shape.items():
