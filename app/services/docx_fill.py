@@ -1,6 +1,8 @@
-from typing import Dict
-from docx import Document
+import os
 import re
+from typing import Dict
+
+from docx import Document
 
 
 def _replace_in_paragraph(paragraph, mapping: Dict[str, str]) -> None:
@@ -60,6 +62,8 @@ def replace_placeholders_docx(template_path: str, output_path: str, mapping: Dic
 
 def generate_docx_from_template(template_path: str, output_path: str, mapping: Dict[str, str]) -> None:
     """Génère un DOCX en remplaçant les tokens et signale ceux restants."""
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Template DOCX introuvable: {template_path}")
     doc = Document(template_path)
     _replace_in_document(doc, mapping)
 

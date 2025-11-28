@@ -1,4 +1,6 @@
 import os
+from datetime import date
+
 import streamlit as st
 
 from app.services.mandat_tokens import build_mandat_mapping
@@ -78,6 +80,20 @@ def render(config):
         )
     with colB:
         st.date_input("Date de début de mandat", key="mandat_date_debut")
+
+        # Date de signature : par défaut aujourd'hui, stockée dans le session_state + formats prêts pour le DOCX
+        default_sig_date = st.session_state.get("mandat_signature_date", date.today()) or date.today()
+        sig_date = st.date_input(
+            "Date de signature du mandat",
+            key="mandat_signature_date",
+            value=default_sig_date,
+        )
+        if not sig_date:
+            sig_date = date.today()
+            st.session_state["mandat_signature_date"] = sig_date
+        jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+        st.session_state["mandat_jour_signature_str"] = jours[sig_date.weekday()]
+        st.session_state["mandat_date_signature_str"] = sig_date.strftime("%d/%m/%Y")
 
     st.text_area("Destination du bien (texte)", key="mandat_destination_bien")
     st.text_area("Remise de pièces (liste/texte)", key="mandat_remise_pieces")

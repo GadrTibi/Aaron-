@@ -45,6 +45,14 @@ def build_mandat_mapping(ss: dict) -> dict:
         date_debut = date_debut.strftime("%d/%m/%Y")
     remise_pj = ss.get("mandat_remise_pieces", "")
 
+    # Date de signature du mandat : fallback sur aujourd'hui pour éviter les tokens non remplacés
+    sig_date = ss.get("mandat_signature_date") or date.today()
+    if not isinstance(sig_date, date):
+        sig_date = date.today()
+    jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+    date_signature_str = ss.get("mandat_date_signature_str") or sig_date.strftime("%d/%m/%Y")
+    jour_signature_str = ss.get("mandat_jour_signature_str") or jours[sig_date.weekday()]
+
     # Normalisations chiffre → str
     def fmt_int(v):
         try:
@@ -90,5 +98,14 @@ def build_mandat_mapping(ss: dict) -> dict:
 
         # Article 16 – Remise de pièces
         "«Remise_de_pièces»": remise_pj,
+
+        # Bas de page – Date de signature du mandat
+        "«MANDAT_DATE_SIGNATURE»": date_signature_str,
+        "«MANDAT_JOUR_SIGNATURE»": jour_signature_str,
     }
+    # Tests manuels recommandés :
+    # 1. Ouvrir la page Mandat, renseigner les champs et choisir une date de signature.
+    # 2. Générer le DOCX Mandat puis l'ouvrir.
+    # 3. Vérifier que «MANDAT_JOUR_SIGNATURE» et «MANDAT_DATE_SIGNATURE» sont remplacés
+    #    (ex. «Fait à Paris, le Lundi 12/05/2025»), et que les autres tokens restent fonctionnels.
     return mapping
