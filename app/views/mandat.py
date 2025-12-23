@@ -5,7 +5,8 @@ import streamlit as st
 
 from app.services.mandat_tokens import build_mandat_mapping
 from app.services.docx_fill import generate_docx_from_template
-from .utils import _sanitize_filename, list_templates, render_generation_report
+from app.services.template_validation import validate_docx_template
+from .utils import _sanitize_filename, list_templates, render_generation_report, render_template_validation
 
 
 def render(config):
@@ -108,20 +109,35 @@ def render(config):
         st.text_input("Ville", key="owner_ville")
         st.text_input("Email", key="owner_email")
 
-    if st.button("Générer le DOCX (Mandat)"):
+    mapping = build_mandat_mapping(st.session_state)
+    strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
+    tpl_path = resolve_mandat_template_path(chosen_man)
+    validation_result = None
+    if tpl_path and os.path.exists(tpl_path):
+        try:
+            validation_result = validate_docx_template(tpl_path, set(mapping.keys()))
+        except Exception as exc:
+            st.warning(f"Validation du template Mandat impossible: {exc}")
+    render_template_validation(validation_result, strict=strict_mode)
+
+    disable_generate = strict_mode and validation_result is not None and validation_result.severity == "KO"
+    if st.button("Générer le DOCX (Mandat)", disabled=disable_generate):
         tpl_path = resolve_mandat_template_path(chosen_man)
         if not tpl_path or not os.path.exists(tpl_path):
             st.error(
                 "Aucun template DOCX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus."
             )
             st.stop()
-        mapping = build_mandat_mapping(st.session_state)
         out_path = os.path.join(
             OUT_DIR, f"Mandat - {st.session_state.get('bien_addr','bien')}.docx"
         )
-        strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
         report = generate_docx_from_template(tpl_path, out_path, mapping, strict=strict_mode)
-        if strict_mode and not report.ok:
+        if validation_result and validation_result.notes:
+            for note in validation_result.notes:
+                report.add_note(note)
+        if strict_mode and validation_result and validation_result.severity == "KO":
+            st.error("Génération bloquée : le template n'est pas valide en mode strict.")
+        elif strict_mode and not report.ok:
             st.error("Génération interrompue : le rapport signale des éléments bloquants.")
         else:
             st.success(f"OK : {out_path}")

@@ -1,10 +1,10 @@
 import os
-import re
 from typing import Dict
 
 from docx import Document
 
 from app.services.generation_report import GenerationReport
+from app.services.token_utils import extract_docx_tokens_from_document
 
 
 def _replace_in_paragraph(paragraph, mapping: Dict[str, str]) -> None:
@@ -63,21 +63,7 @@ def replace_placeholders_docx(template_path: str, output_path: str, mapping: Dic
 
 
 def _collect_leftovers(doc) -> set[str]:
-    pat = re.compile(r"«[^»]+»")
-    leftovers: set[str] = set()
-
-    def collect(paragraph) -> None:
-        txt = "".join(r.text for r in paragraph.runs)
-        leftovers.update(pat.findall(txt))
-
-    for p in doc.paragraphs:
-        collect(p)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    collect(p)
-    return leftovers
+    return extract_docx_tokens_from_document(doc)
 
 
 def generate_docx_from_template(

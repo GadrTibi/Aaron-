@@ -46,6 +46,7 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
 - PPTX Estimation : tous les fichiers dans `EST_TPL_DIR` (upload possible via UI) ou héritage `estimation_template.pptx` dans `TPL_DIR`. 【app/views/estimation.py†L96-L121】
 - DOCX Mandat : modèles dans `MANDAT_TPL_DIR` ou `mandat_template.docx` dans `TPL_DIR`. 【app/views/mandat.py†L17-L47】
 - PPTX Book : modèles dans `BOOK_TPL_DIR` (UI upload). Aucun héritage. 【app/views/book.py†L22-L52】
+- Validation pré-génération : chaque page affiche une section « Validation du template » listant tokens inconnus et shapes manquantes ; en mode strict, un statut KO désactive la génération. 【app/views/estimation.py†L337-L375】【app/views/mandat.py†L82-L126】【app/views/book.py†L137-L184】
 
 ## Gestion des chemins
 - **Création automatique** : `TPL_DIR`, `EST_TPL_DIR`, `BOOK_TPL_DIR`, `MANDAT_TPL_DIR`, `OUT_DIR`, `IMG_CACHE_DIR` créés au démarrage. Par défaut dans le repo (`app/main.py`) ou dans `~/Documents/MFY-App` via `run_app.py`/`runtime_paths.ensure_dirs`. 【app/main.py†L28-L45】【app/runtime_paths.py†L19-L52】

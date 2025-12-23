@@ -12,9 +12,16 @@ from app.services.book_tokens import build_book_mapping
 from app.services.geocode import geocode_address
 from app.services.map_image import build_static_map
 from app.services.poi import fetch_transports, list_metro_lines, list_bus_lines
+from app.services.pptx_requirements import get_book_detectors, get_book_requirements
 from app.services.pptx_fill import generate_book_pptx
+from app.services.template_validation import validate_pptx_template
 
-from .utils import _sanitize_filename, list_templates, render_generation_report
+from .utils import (
+    _sanitize_filename,
+    list_templates,
+    render_generation_report,
+    render_template_validation,
+)
 
 
 def _format_taxi_summary(items: list[dict]) -> str:
@@ -219,19 +226,39 @@ def render(config: dict) -> None:
     if st.session_state.get("book_img_appart"):
         image_by_shape["APPARTEMENT_MASK"] = st.session_state["book_img_appart"]
 
+    strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
+    tpl_for_validation = resolve_book_path(chosen_book)
+    validation_result = None
+    if tpl_for_validation and os.path.exists(tpl_for_validation):
+        try:
+            validation_result = validate_pptx_template(
+                tpl_for_validation,
+                set(mapping.keys()),
+                get_book_requirements(),
+                requirement_detectors=get_book_detectors(),
+            )
+        except Exception as exc:
+            st.warning(f"Validation du template Book impossible: {exc}")
+    render_template_validation(validation_result, strict=strict_mode)
+
     # ---- Generation ----
     st.subheader("Générer le Book")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Générer le Book (PPTX)"):
+        disable_generate = strict_mode and validation_result is not None and validation_result.severity == "KO"
+        if st.button("Générer le Book (PPTX)", disabled=disable_generate):
             tpl = resolve_book_path(chosen_book)
             if not tpl or not os.path.exists(tpl):
                 st.error("Aucun template Book PPTX sélectionné. Déposez/choisissez un template ci-dessus.")
                 st.stop()
             pptx_out = os.path.join(OUT_DIR, f"Book - {st.session_state.get('bien_addr', 'bien')}.pptx")
-            strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
             report = generate_book_pptx(tpl, pptx_out, mapping, image_by_shape=image_by_shape or None, strict=strict_mode)
-            if strict_mode and not report.ok:
+            if validation_result and validation_result.notes:
+                for note in validation_result.notes:
+                    report.add_note(note)
+            if strict_mode and validation_result and validation_result.severity == "KO":
+                st.error("Génération bloquée : le template n'est pas valide en mode strict.")
+            elif strict_mode and not report.ok:
                 st.error("Génération interrompue : le rapport signale des éléments bloquants.")
             else:
                 st.success(f"OK: {pptx_out}")

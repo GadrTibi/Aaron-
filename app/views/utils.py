@@ -3,6 +3,7 @@ import re
 import streamlit as st
 
 from app.services.generation_report import GenerationReport
+from app.services.template_validation import ValidationResult
 
 def _sanitize_filename(name: str, ext: str) -> str:
     base = os.path.basename(name)
@@ -52,3 +53,24 @@ def render_generation_report(report: GenerationReport, *, strict: bool = False) 
                 st.write(f"- {note}")
         if not has_warning and report.ok:
             st.caption("Rien à signaler.")
+
+
+def render_template_validation(result: ValidationResult | None, *, strict: bool = False) -> None:
+    if result is None:
+        return
+    status = result.severity
+    if status == "KO":
+        st.error("Validation du template : KO")
+    elif status == "WARN":
+        st.warning("Validation du template : avertissements")
+    else:
+        st.success("Validation du template : OK")
+
+    st.write("**Checklist template**")
+    st.write(f"- Tokens inconnus : {', '.join(result.unknown_tokens_in_template) if result.unknown_tokens_in_template else 'aucun'}")
+    st.write(f"- Shapes manquantes : {', '.join(result.missing_required_shapes) if result.missing_required_shapes else 'aucune'}")
+    if result.notes:
+        for note in result.notes:
+            st.caption(f"• {note}")
+    if strict and status == "KO":
+        st.error("Mode strict : génération bloquée tant que la validation est KO.")

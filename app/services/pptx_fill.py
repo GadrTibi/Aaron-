@@ -11,18 +11,9 @@ from PIL import Image
 from app.services.pptx_images import inject_tagged_image
 from services.pptx_links import add_hyperlink_to_text
 from app.services.generation_report import GenerationReport
+from app.services.token_utils import extract_pptx_tokens_from_presentation, walk_pptx_shapes
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _walk_shapes(shapes):
-    """Yield all shapes recursively, diving into groups."""
-    for sh in shapes:
-        yield sh
-        # If the shape is a group, dive into its children and yield them too
-        if hasattr(sh, "shapes"):
-            for sub in _walk_shapes(sh.shapes):
-                yield sub
 
 
 def insert_plot_into_pptx(template_path: str, output_path: str, image_path: str, report: Optional[GenerationReport] = None, *, strict: bool = False) -> None:
@@ -52,7 +43,7 @@ def insert_plot_into_pptx(template_path: str, output_path: str, image_path: str,
         return re.match(r"(?i).*histo.*-?mask$", norm) is not None
 
     target_shape = None
-    for sh in _walk_shapes(slide.shapes):
+    for sh in walk_pptx_shapes(slide.shapes):
         if _is_mask(getattr(sh, "name", None)):
             target_shape = sh
             break
@@ -120,7 +111,7 @@ def _replace_token_in_paragraph(paragraph, token: str, value: str) -> bool:
     return changed
 
 def replace_text_preserving_style(shapes, mapping: Dict[str, str]) -> None:
-    for shape in _walk_shapes(shapes):
+    for shape in walk_pptx_shapes(shapes):
         if hasattr(shape, "text_frame") and shape.text_frame:
             for para in shape.text_frame.paragraphs:
                 for token, value in mapping.items():
@@ -143,7 +134,7 @@ def replace_image_by_shape_name(prs, shape_name: str, image_path: str, report: O
         pass
 
     for slide in prs.slides:
-        for sh in _walk_shapes(slide.shapes):
+        for sh in walk_pptx_shapes(slide.shapes):
             try:
                 if (sh.name or "").strip() == shape_name:
                     left, top, width, height = sh.left, sh.top, sh.width, sh.height
@@ -169,15 +160,7 @@ def replace_image_by_shape_name(prs, shape_name: str, image_path: str, report: O
 
 
 def _collect_leftover_tokens(prs: Presentation) -> List[str]:
-    pattern = re.compile(r"\[\[[^\]]+\]\]")
-    found: set[str] = set()
-    for slide in prs.slides:
-        for sh in _walk_shapes(slide.shapes):
-            if hasattr(sh, "text_frame") and sh.text_frame:
-                for para in sh.text_frame.paragraphs:
-                    txt = "".join(r.text for r in para.runs)
-                    found.update(pattern.findall(txt))
-    return sorted(found)
+    return sorted(extract_pptx_tokens_from_presentation(prs))
 
 def generate_estimation_pptx(
     template_path: str,

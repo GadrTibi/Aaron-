@@ -8,13 +8,23 @@ from app.services.plots import build_estimation_histo
 from app.services.pptx_fill import generate_estimation_pptx
 from app.services.geocode import geocode_address
 from app.services.map_image import build_static_map
+from app.services.pptx_requirements import (
+    get_estimation_detectors,
+    get_estimation_requirements,
+)
+from app.services.template_validation import validate_pptx_template
 from services.image_uploads import save_uploaded_image
 from services.places_google import GPlace, GooglePlacesService
 from services.wiki_images import ImageCandidate, WikiImageService
 from services.transports_v3 import TransportService
 
 from .settings_keys import read_local_secret
-from .utils import _sanitize_filename, list_templates, render_generation_report
+from .utils import (
+    _sanitize_filename,
+    list_templates,
+    render_generation_report,
+    render_template_validation,
+)
 
 
 @st.cache_data(ttl=120)
@@ -602,10 +612,25 @@ def render(config):
 
     print("DBG image_by_shape (final):", image_by_shape)
 
+    strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
+    est_tpl_path = resolve_est_path(chosen_est)
+    validation_result = None
+    if est_tpl_path and os.path.exists(est_tpl_path):
+        try:
+            validation_result = validate_pptx_template(
+                est_tpl_path,
+                set(mapping.keys()),
+                get_estimation_requirements(),
+                requirement_detectors=get_estimation_detectors(),
+            )
+        except Exception as exc:
+            st.warning(f"Validation du template Estimation impossible: {exc}")
+    render_template_validation(validation_result, strict=strict_mode)
+
     # ---- Generate Estimation ----
     st.subheader("Générer l'Estimation (PPTX)")
-    est_tpl_path = resolve_est_path(chosen_est)
-    if st.button("Générer le PPTX (Estimation)"):
+    disable_generate = strict_mode and validation_result is not None and validation_result.severity == "KO"
+    if st.button("Générer le PPTX (Estimation)", disabled=disable_generate):
         if not est_tpl_path or not os.path.exists(est_tpl_path):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
@@ -621,7 +646,6 @@ def render(config):
             st.error(f"Graphique estimation indisponible: {exc}")
             st.stop()
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
         report = generate_estimation_pptx(
             est_tpl_path,
             pptx_out,
@@ -630,7 +654,12 @@ def render(config):
             image_by_shape=image_by_shape or None,
             strict=strict_mode,
         )
-        if strict_mode and not report.ok:
+        if validation_result and validation_result.notes:
+            for note in validation_result.notes:
+                report.add_note(note)
+        if strict_mode and validation_result and validation_result.severity == "KO":
+            st.error("Génération bloquée : le template n'est pas valide en mode strict.")
+        elif strict_mode and not report.ok:
             st.error("Génération interrompue : le rapport signale des éléments bloquants.")
         else:
             st.success(f"OK: {pptx_out}")
