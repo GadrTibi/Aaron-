@@ -52,8 +52,8 @@ def test_enriched_uses_google_when_key(monkeypatch):
     result = facade.get_transports(10.0, 20.0, mode="ENRICHED")
 
     assert calls["google"] == 1
-    assert "G1" in result["metro_lines"]
-    assert "G2" in result["bus_lines"]
+    assert any("G1" in line for line in result["metro_lines"])
+    assert any("G2" in line for line in result["bus_lines"])
 
 
 def test_full_adds_gtfs(monkeypatch):

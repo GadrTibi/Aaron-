@@ -309,6 +309,8 @@ def render(config):
                         "mode": transport_mode,
                         "metro_count": len(tr.get("metro_lines", [])),
                         "bus_count": len(tr.get("bus_lines", [])),
+                        "raw_metro": tr.get("raw_counts", {}).get("metro"),
+                        "raw_bus": tr.get("raw_counts", {}).get("bus"),
                     }
                     run_report.add_note(
                         f"Transports: {perf_transports['duration']:.2f}s (cache {perf_transports['cache']}, mode {transport_mode})."
@@ -326,15 +328,19 @@ def render(config):
                 if perf_geocode:
                     st.write(f"Géocodage: {perf_geocode.get('duration', 0):.2f}s via {perf_geocode.get('provider', '')} ({perf_geocode.get('cache', '')})")
                 if perf_transports:
-                    st.write(f"Transports: {perf_transports.get('duration', 0):.2f}s cache={perf_transports.get('cache', '')}")
+                    st.write(
+                        f"Transports: {perf_transports.get('duration', 0):.2f}s cache={perf_transports.get('cache', '')} "
+                        f"bruts métro/bus: {perf_transports.get('raw_metro', '-')}/{perf_transports.get('raw_bus', '-')} "
+                        f"affichés métro/bus: {perf_transports.get('metro_count', 0)}/{perf_transports.get('bus_count', 0)}"
+                    )
     taxi_txt = st.session_state.get("q_tx", "")
     metro_auto = st.session_state.get('metro_lines_auto', [])
     bus_auto = st.session_state.get('bus_lines_auto', [])
-    metro_refs = _format_line_labels(metro_auto, "Ligne")
-    bus_refs = _format_line_labels(bus_auto, "Bus")
+    metro_refs = _format_line_labels(metro_auto, "")
+    bus_refs = _format_line_labels(bus_auto, "")
     st.write(f"Taxi : {taxi_txt or '—'}")
-    st.write(f"Métro : {metro_refs or '—'}")
-    st.write(f"Bus : {bus_refs or '—'}")
+    st.write(f"Stations proches : {metro_refs or '—'}")
+    st.write(f"Arrêts de bus proches : {bus_refs or '—'}")
     providers = st.session_state.get('transport_providers')
     if isinstance(providers, dict) and providers:
         st.caption(

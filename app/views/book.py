@@ -168,11 +168,11 @@ def render(config: dict) -> None:
     taxi_txt = st.session_state.get("q_tx", "")
     metro_auto = st.session_state.get("metro_lines_auto") or []
     bus_auto = st.session_state.get("bus_lines_auto") or []
-    metro_refs = _format_line_labels(metro_auto, "Ligne")
-    bus_refs = _format_line_labels(bus_auto, "Bus")
+    metro_refs = _format_line_labels(metro_auto, "")
+    bus_refs = _format_line_labels(bus_auto, "")
     st.write(f"Taxi : {taxi_txt or '—'}")
-    st.write(f"Métro : {metro_refs or '—'}")
-    st.write(f"Bus : {bus_refs or '—'}")
+    st.write(f"Stations proches : {metro_refs or '—'}")
+    st.write(f"Arrêts de bus proches : {bus_refs or '—'}")
 
     # ---- Instructions (Slide 5) ----
     st.subheader("Instructions (Slide 5)")

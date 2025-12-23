@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import math
+import re
 import time
 from functools import lru_cache
 from time import perf_counter
@@ -34,7 +35,8 @@ _GENERATION_TRACKER: CacheDict = {}
 
 _TTL_SECONDS = 7 * 24 * 3600
 _CACHE_ROUNDING = 4
-_MAX_RESULTS = 10
+_MAX_RESULTS = 4
+_DEFAULT_TAXI_DESTINATION = "Paris, Opéra"
 
 
 def _round_coord(value: float, digits: int = _CACHE_ROUNDING) -> float:
@@ -60,18 +62,28 @@ def _cache_key(lat: float, lon: float, radius_m: int, mode: str, has_google: boo
     return f"{lat}:{lon}:{int(radius_m)}:{mode}:{has_google}"
 
 
-def _dedupe_sorted(values: Iterable[Tuple[float, str]], limit: int = _MAX_RESULTS) -> list[str]:
+def normalize_name(name: str | None) -> str:
+    text = (name or "").strip().lower()
+    text = re.sub(r"[–—−]", "-", text)
+    text = re.sub(r"\s+", " ", text)
+    for prefix in ("bus ", "ligne "):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+            break
+    return text.strip()
+
+
+def _dedupe_labels(values: Iterable[str], limit: int = _MAX_RESULTS) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
-    for _, label in sorted(values, key=lambda x: x[0]):
-        norm = label.strip()
-        if not norm:
+    for label in values:
+        norm = normalize_name(label)
+        if not norm or norm in seen:
             continue
-        key = norm.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(norm)
+        seen.add(norm)
+        clean = str(label).strip()
+        if clean:
+            result.append(clean)
         if len(result) >= limit:
             break
     return result
@@ -91,18 +103,28 @@ def _extract_coords(element: Dict[str, Any]) -> Tuple[float | None, float | None
     return None, None
 
 
-def _build_overpass_query(lat: float, lon: float, radius_m: int) -> str:
+def _build_station_query(lat: float, lon: float, radius_m: int) -> str:
     radius = max(int(radius_m), 200)
     return (
         "[out:json][timeout:12];\n"
         "(\n"
-        f"  node(around:{radius},{lat},{lon})[railway=station];\n"
-        f"  node(around:{radius},{lat},{lon})[railway=tram_stop];\n"
-        f"  node(around:{radius},{lat},{lon})[public_transport=stop_position];\n"
-        f"  node(around:{radius},{lat},{lon})[public_transport=platform];\n"
-        f"  node(around:{radius},{lat},{lon})[highway=bus_stop];\n"
+        f"  nwr(around:{radius},{lat},{lon})[railway~\"^(station|halt)$\"];\n"
+        f"  nwr(around:{radius},{lat},{lon})[station=subway];\n"
+        f"  nwr(around:{radius},{lat},{lon})[railway=tram_stop];\n"
+        f"  nwr(around:{radius},{lat},{lon})[public_transport=station];\n"
         ");\n"
-        "out tags center 150;"
+        "out tags center 50;"
+    )
+
+
+def _build_bus_query(lat: float, lon: float, radius_m: int) -> str:
+    radius = max(int(radius_m), 200)
+    return (
+        "[out:json][timeout:12];\n"
+        "(\n"
+        f"  nwr(around:{radius},{lat},{lon})[highway=bus_stop];\n"
+        ");\n"
+        "out tags center 50;"
     )
 
 
@@ -110,45 +132,92 @@ def _query_overpass_points(query: str) -> Tuple[List[Dict[str, Any]], Dict[str, 
     return query_overpass(query, "transports_facade")
 
 
-def _parse_overpass_elements(lat: float, lon: float, elements: Iterable[Dict[str, Any]]) -> Tuple[list[str], list[str]]:
-    metro_candidates: list[tuple[float, str]] = []
-    bus_candidates: list[tuple[float, str]] = []
+def _finalize_entries(candidates: Iterable[Dict[str, Any]], *, prefix: str) -> list[str]:
+    labels: list[str] = []
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda item: item.get("distance_m") if item.get("distance_m") is not None else float("inf"),
+    )
+    for entry in sorted_candidates:
+        name = str(entry.get("name") or entry.get("ref") or prefix).strip()
+        norm = normalize_name(name)
+        if not norm:
+            continue
+        label = f"{prefix} {name}" if prefix else name
+        distance = entry.get("distance_m")
+        distance_int: int | None
+        if distance is not None:
+            try:
+                distance_int = int(round(float(distance)))
+            except Exception:
+                distance_int = None
+        else:
+            distance_int = None
+        if distance_int is not None:
+            label = f"{label} ({distance_int} m)"
+        labels.append(label)
+    return _dedupe_labels(labels)
+
+
+def _parse_overpass_elements(lat: float, lon: float, elements: Iterable[Dict[str, Any]], *, default_label: str) -> list[Dict[str, Any]]:
+    candidates: list[Dict[str, Any]] = []
     for element in elements:
         tags = element.get("tags") or {}
         lat2, lon2 = _extract_coords(element)
         if lat2 is None or lon2 is None:
             continue
         distance = _distance_m(lat, lon, lat2, lon2)
-        is_bus = tags.get("highway") == "bus_stop" or tags.get("bus") == "yes"
-        ref = tags.get("ref") or tags.get("name") or tags.get("public_transport") or ""
-        label = str(ref).strip() or "Arrêt"
-        if is_bus:
-            bus_candidates.append((distance, label))
-        else:
-            metro_candidates.append((distance, label))
-    return _dedupe_sorted(metro_candidates), _dedupe_sorted(bus_candidates)
+        name = tags.get("name") or tags.get("ref") or default_label
+        candidates.append({"name": str(name).strip() or default_label, "ref": tags.get("ref"), "distance_m": distance})
+    return candidates
 
 
 def _fetch_overpass_data(lat: float, lon: float, radius_m: int) -> Dict[str, Any]:
     warnings: list[str] = []
-    query = _build_overpass_query(lat, lon, radius_m)
-    try:
-        elements, debug = _query_overpass_points(query)
-    except requests.Timeout:
-        debug = {"status": "timeout", "error": "timeout"}
-        elements = []
-    except Exception as exc:
-        debug = {"status": "error", "error": str(exc)}
-        elements = []
+    start_total = perf_counter()
 
-    if debug.get("status") in {"timeout"} or str(debug.get("error", "")).startswith("http_429"):
-        warnings.append("Overpass indisponible (timeout ou 429)")
-    metro_lines, bus_lines = _parse_overpass_elements(lat, lon, elements)
+    station_query = _build_station_query(lat, lon, radius_m)
+    bus_query = _build_bus_query(lat, lon, radius_m)
+
+    def _run_query(query: str, label: str) -> tuple[list[Dict[str, Any]], Dict[str, Any]]:
+        try:
+            elements, dbg = _query_overpass_points(query)
+        except requests.Timeout:
+            return [], {"status": "timeout", "label": label}
+        except Exception as exc:
+            return [], {"status": "error", "label": label, "error": str(exc)}
+        dbg = dbg or {}
+        dbg.setdefault("label", label)
+        dbg.setdefault("items", len(elements))
+        return elements, dbg
+
+    station_elements, station_debug = _run_query(station_query, "stations")
+    bus_elements, bus_debug = _run_query(bus_query, "bus")
+
+    if station_debug.get("status") in {"timeout"} or str(station_debug.get("error", "")).startswith("http_429"):
+        warnings.append("Overpass indisponible (timeout ou 429) pour les stations")
+    if bus_debug.get("status") in {"timeout"} or str(bus_debug.get("error", "")).startswith("http_429"):
+        warnings.append("Overpass indisponible (timeout ou 429) pour les arrêts de bus")
+
+    metro_candidates = _parse_overpass_elements(lat, lon, station_elements, default_label="Station")
+    bus_candidates = _parse_overpass_elements(lat, lon, bus_elements, default_label="Arrêt de bus")
+
+    metro_lines = _finalize_entries(metro_candidates, prefix="Station")
+    bus_lines = _finalize_entries(bus_candidates, prefix="Arrêt")
+
+    duration_ms = int((perf_counter() - start_total) * 1000)
+    overpass_debug = {
+        "metro": {**station_debug, "raw_items": len(station_elements), "kept": len(metro_lines)},
+        "bus": {**bus_debug, "raw_items": len(bus_elements), "kept": len(bus_lines)},
+        "duration_ms": duration_ms,
+    }
+
     return {
         "metro_lines": metro_lines,
         "bus_lines": bus_lines,
         "warnings": warnings,
-        "debug": debug,
+        "debug": overpass_debug,
+        "raw_counts": {"metro": len(station_elements), "bus": len(bus_elements)},
     }
 
 
@@ -207,8 +276,8 @@ def _enrich_with_google(lat: float, lon: float, radius_m: int, *, api_key: str) 
         else:
             metro.append((0, label))
     return {
-        "metro_lines": _dedupe_sorted(metro),
-        "bus_lines": _dedupe_sorted(bus),
+        "metro_lines": _dedupe_labels([label for _, label in metro]),
+        "bus_lines": _dedupe_labels([label for _, label in bus]),
         "warnings": warnings,
         "debug": {"status": "ok"},
     }
@@ -218,9 +287,54 @@ def _apply_gtfs_enrichment(lat: float, lon: float, radius_m: int, metro_lines: l
     provider = GTFSProvider()
     remaining_metro = provider.get_metro_lines(lat, lon, radius_m)
     remaining_bus = provider.get_bus_lines(lat, lon, radius_m)
-    merged_metro = _dedupe_sorted([(0, line) for line in metro_lines] + [(0, line) for line in remaining_metro])
-    merged_bus = _dedupe_sorted([(0, line) for line in bus_lines] + [(0, line) for line in remaining_bus])
+    merged_metro = _dedupe_labels(list(metro_lines) + list(remaining_metro))
+    merged_bus = _dedupe_labels(list(bus_lines) + list(remaining_bus))
     return merged_metro, merged_bus
+
+
+def _normalize_entries(items: Iterable[str | Dict[str, Any]], *, prefix: str) -> list[str]:
+    normalized: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("ref") or prefix
+        else:
+            name = item
+        if not name:
+            continue
+        label = f"{prefix} {name}".strip() if prefix else str(name).strip()
+        normalized.append(label)
+    return _dedupe_labels(normalized)
+
+
+def _estimate_taxi_time(lat: float, lon: float, *, api_key: str, destination: str = _DEFAULT_TAXI_DESTINATION) -> list[str]:
+    if not api_key:
+        return []
+    params = {
+        "destinations": destination,
+        "origins": f"{lat},{lon}",
+        "mode": "driving",
+        "key": api_key,
+    }
+    try:
+        response = requests.get("https://maps.googleapis.com/maps/api/distancematrix/json", params=params, timeout=8)
+        response.raise_for_status()
+        data = response.json()
+        rows = data.get("rows") if isinstance(data, dict) else []
+        if not rows:
+            return []
+        elements = rows[0].get("elements") if isinstance(rows[0], dict) else []
+        if not elements:
+            return []
+        duration = elements[0].get("duration") or {}
+        seconds = duration.get("value")
+        if seconds is None:
+            return []
+        minutes = int(round(float(seconds) / 60.0))
+        return [f"Temps de voiture estimé: {minutes} min (vers {destination})"]
+    except requests.Timeout:
+        return []
+    except requests.RequestException:
+        return []
 
 
 def _cache_decorator():
@@ -256,15 +370,23 @@ def _fetch_transports(lat: float, lon: float, radius_m: int, mode: str, has_goog
     if metro_lines or bus_lines:
         provider_used.update({"metro": "overpass", "bus": "overpass"})
 
+    raw_counts = overpass_data.get("raw_counts", {})
+    raw_metro = raw_counts.get("metro", 0)
+    raw_bus = raw_counts.get("bus", 0)
+
     if mode in {"ENRICHED", "FULL"} and has_google:
         google_data = _enrich_with_google(lat, lon, radius_m, api_key=_google_api_key())
         warnings.extend(google_data.get("warnings", []))
         debug["google"] = google_data.get("debug", {})
         if google_data.get("metro_lines"):
-            metro_lines = _dedupe_sorted([(0, line) for line in metro_lines] + [(0, line) for line in google_data["metro_lines"]])
+            metro_lines = _dedupe_labels(
+                list(metro_lines) + _normalize_entries(google_data["metro_lines"], prefix="Station")
+            )
             provider_used["metro"] = provider_used.get("metro", "google")
         if google_data.get("bus_lines"):
-            bus_lines = _dedupe_sorted([(0, line) for line in bus_lines] + [(0, line) for line in google_data["bus_lines"]])
+            bus_lines = _dedupe_labels(
+                list(bus_lines) + _normalize_entries(google_data["bus_lines"], prefix="Arrêt")
+            )
             provider_used["bus"] = provider_used.get("bus", "google")
     elif mode in {"ENRICHED", "FULL"} and not has_google:
         warnings.append("Google Places désactivé (clé absente)")
@@ -276,13 +398,20 @@ def _fetch_transports(lat: float, lon: float, radius_m: int, mode: str, has_goog
         if bus_lines:
             provider_used.setdefault("bus", "gtfs")
 
+    taxis: list[str] = []
+    if mode == "FAST":
+        taxis = ["Non calculé (mode FAST)"]
+    elif has_google:
+        taxis = _estimate_taxi_time(lat, lon, api_key=_google_api_key()) or []
+
     return {
         "metro_lines": metro_lines[:_MAX_RESULTS],
         "bus_lines": bus_lines[:_MAX_RESULTS],
-        "taxis": [],
+        "taxis": taxis,
         "provider_used": provider_used,
         "warnings": warnings,
         "debug": debug,
+        "raw_counts": {"metro": raw_metro, "bus": raw_bus},
     }
 
 
