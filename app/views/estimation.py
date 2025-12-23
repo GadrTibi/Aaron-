@@ -17,11 +17,11 @@ from app.services.pptx_requirements import (
     get_estimation_detectors,
     get_estimation_requirements,
 )
+from app.services.transports_facade import get_transports
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.template_validation import validate_pptx_template
 from services.image_uploads import save_uploaded_image
 from services.wiki_images import ImageCandidate, WikiImageService
-from services.transports_v3 import TransportService
 
 from .utils import (
     _sanitize_filename,
@@ -276,6 +276,12 @@ def render(config):
     st.subheader("Quartier (Slide 4)")
     quartier_texte = st.text_area("Texte d'intro du quartier (paragraphe)", st.session_state.get("q_txt", "Texte libre saisi par l'utilisateur."), key="q_txt")
     perf_transports: dict[str, object] = {}
+    transport_mode = st.selectbox(
+        "Mode transports",
+        options=["FAST", "ENRICHED", "FULL"],
+        index=0,
+        help="FAST (Overpass uniquement, recommandé), ENRICHED (Overpass + Google si disponible), FULL (ajoute GTFS).",
+    )
     if st.button("Remplir Transports (auto)"):
         lat, lon, provider_used, perf_geocode = _geocode_main_address(show_debug=geocode_debug)
         if lat is not None:
@@ -287,18 +293,26 @@ def render(config):
                         radius = int(radius_raw)
                     except (TypeError, ValueError):
                         radius = 1200
-                    service = TransportService()
-                    tr = service.get(lat, lon, radius_m=radius, use_cache=True)
-                    st.session_state["q_tx"] = ", ".join(tr.taxis)
-                    st.session_state["metro_lines_auto"] = tr.metro_lines
-                    st.session_state["bus_lines_auto"] = tr.bus_lines
-                    st.session_state["transport_providers"] = tr.provider_used
+                    warning_count = len(run_report.provider_warnings)
+                    tr = get_transports(lat, lon, radius_m=radius, mode=transport_mode, report=run_report)
+                    st.session_state["q_tx"] = ", ".join(tr.get("taxis", []))
+                    st.session_state["metro_lines_auto"] = tr.get("metro_lines", [])
+                    st.session_state["bus_lines_auto"] = tr.get("bus_lines", [])
+                    st.session_state["transport_providers"] = tr.get("provider_used", {})
+                    new_warnings = run_report.provider_warnings[warning_count:]
+                    for warning in new_warnings:
+                        st.warning(warning)
                     perf_transports = {
                         "duration": perf_counter() - start_tr,
-                        "provider": tr.provider_used,
-                        "cache": tr.cache_status or "miss",
+                        "provider": tr.get("provider_used", {}),
+                        "cache": tr.get("cache_status", "miss"),
+                        "mode": transport_mode,
+                        "metro_count": len(tr.get("metro_lines", [])),
+                        "bus_count": len(tr.get("bus_lines", [])),
                     }
-                    run_report.add_note(f"Transports: {perf_transports['duration']:.2f}s (cache {perf_transports['cache']}).")
+                    run_report.add_note(
+                        f"Transports: {perf_transports['duration']:.2f}s (cache {perf_transports['cache']}, mode {transport_mode})."
+                    )
                 except Exception as e:
                     st.warning(f"Transports non chargés: {e}")
                     st.session_state['transport_providers'] = {}
@@ -329,6 +343,10 @@ def render(config):
                 bus=providers.get("bus", "-"),
                 taxi=providers.get("taxi", "-"),
             )
+        )
+    if perf_transports:
+        st.caption(
+            f"Transports chargés: métro {perf_transports.get('metro_count', 0)}, bus {perf_transports.get('bus_count', 0)} | cache={perf_transports.get('cache', '')} | mode={perf_transports.get('mode', '')}"
         )
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
