@@ -3,6 +3,7 @@ from datetime import date
 
 import streamlit as st
 
+from app.services.generation_report import GenerationReport
 from app.services.mandat_tokens import build_mandat_mapping
 from app.services.docx_fill import generate_docx_from_template
 from app.services.template_validation import validate_docx_template
@@ -13,6 +14,7 @@ def render(config):
     TPL_DIR = config["TPL_DIR"]
     MANDAT_TPL_DIR = config["MANDAT_TPL_DIR"]
     OUT_DIR = config["OUT_DIR"]
+    run_report = GenerationReport()
 
     # ---- Templates Mandat (DOCX) ----
     st.subheader("Templates Mandat (DOCX)")
@@ -135,6 +137,7 @@ def render(config):
         if validation_result and validation_result.notes:
             for note in validation_result.notes:
                 report.add_note(note)
+        report.merge(run_report)
         if strict_mode and validation_result and validation_result.severity == "KO":
             st.error("Génération bloquée : le template n'est pas valide en mode strict.")
         elif strict_mode and not report.ok:

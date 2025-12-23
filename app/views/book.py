@@ -9,7 +9,8 @@ import streamlit as st
 
 from app.services.book_pdf import build_book_pdf
 from app.services.book_tokens import build_book_mapping
-from app.services.geocode import geocode_address
+from app.services.generation_report import GenerationReport
+from app.services.geocoding_fallback import geocode_address_fallback
 from app.services.map_image import build_static_map
 from app.services.poi import fetch_transports, list_metro_lines, list_bus_lines
 from app.services.pptx_requirements import get_book_detectors, get_book_requirements
@@ -77,6 +78,7 @@ def _display_transport_caption(*debug_values: dict | None) -> None:
 def render(config: dict) -> None:
     BOOK_TPL_DIR = config["BOOK_TPL_DIR"]
     OUT_DIR = config["OUT_DIR"]
+    run_report = GenerationReport()
 
     # ---- Template management ----
     st.subheader("Templates Book (PPTX)")
@@ -128,9 +130,14 @@ def render(config: dict) -> None:
             st.warning("Adresse introuvable…")
             return None, None
         with st.spinner("Recherche d'adresse…"):
-            lat, lon = geocode_address(addr)
+            lat, lon, provider_used = geocode_address_fallback(addr, report=run_report)
         if lat is None:
-            st.warning("Adresse introuvable…")
+            if run_report.provider_warnings:
+                st.error(run_report.provider_warnings[-1])
+            else:
+                st.warning("Adresse introuvable…")
+        elif provider_used and provider_used != "Nominatim":
+            st.warning(f"Fallback géocodage: {provider_used} utilisé.")
         st.session_state["geo_lat"] = lat
         st.session_state["geo_lon"] = lon
         return lat, lon
@@ -256,6 +263,7 @@ def render(config: dict) -> None:
             if validation_result and validation_result.notes:
                 for note in validation_result.notes:
                     report.add_note(note)
+            report.merge(run_report)
             if strict_mode and validation_result and validation_result.severity == "KO":
                 st.error("Génération bloquée : le template n'est pas valide en mode strict.")
             elif strict_mode and not report.ok:

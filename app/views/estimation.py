@@ -3,47 +3,29 @@ from typing import Iterable, Optional
 
 import streamlit as st
 
-from app.services.revenue import RevenueInputs, compute_revenue
-from app.services.plots import build_estimation_histo
-from app.services.pptx_fill import generate_estimation_pptx
-from app.services.geocode import geocode_address
+from app.services.generation_report import GenerationReport
+from app.services.geocoding_fallback import geocode_address_fallback
 from app.services.map_image import build_static_map
+from app.services.plots import build_estimation_histo
+from app.services.poi_facade import POIResult, get_pois
+from app.services.provider_status import get_provider_status
+from app.services.pptx_fill import generate_estimation_pptx
 from app.services.pptx_requirements import (
     get_estimation_detectors,
     get_estimation_requirements,
 )
+from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.template_validation import validate_pptx_template
 from services.image_uploads import save_uploaded_image
-from services.places_google import GPlace, GooglePlacesService
 from services.wiki_images import ImageCandidate, WikiImageService
 from services.transports_v3 import TransportService
 
-from .settings_keys import read_local_secret
 from .utils import (
     _sanitize_filename,
     list_templates,
     render_generation_report,
     render_template_validation,
 )
-
-
-@st.cache_data(ttl=120)
-def _load_google_places(
-    category: str,
-    api_key: str,
-    lat: float,
-    lon: float,
-    radius_m: int,
-    limit: int,
-) -> list[GPlace]:
-    service = GooglePlacesService(api_key)
-    if category == "incontournables":
-        return service.list_incontournables(lat, lon, radius_m, limit)
-    if category == "spots":
-        return service.list_spots(lat, lon, radius_m, limit)
-    if category == "visits":
-        return service.list_visits(lat, lon, radius_m, limit)
-    raise ValueError(f"Catégorie Google Places inconnue: {category}")
 
 
 def _restore_candidates(key: str) -> list[ImageCandidate]:
@@ -133,15 +115,32 @@ def _display_transport_caption(*debug_values: dict | None) -> None:
         caption_parts.append(f"mirror={mirror}")
     caption_parts.extend(parts)
     try:
-        st.caption("Transports: " + " | ".join(caption_parts))
+            st.caption("Transports: " + " | ".join(caption_parts))
     except Exception:
         pass
+
+
+def _compact_provider_status() -> str:
+    status = get_provider_status()
+    labels = []
+    order = [
+        ("Google Places", "Google"),
+        ("Geoapify", "Geoapify"),
+        ("OpenTripMap", "OTM"),
+        ("Wikimedia", "Wiki"),
+    ]
+    for key, short in order:
+        entry = status.get(key, {})
+        emoji = "✅" if entry.get("enabled") else "❌"
+        labels.append(f"{short} {emoji}")
+    return " / ".join(labels)
 
 
 def render(config):
     TPL_DIR = config['TPL_DIR']
     EST_TPL_DIR = config['EST_TPL_DIR']
     OUT_DIR = config['OUT_DIR']
+    run_report = GenerationReport()
 
     # ---------- APPLY PENDING PREFILL BEFORE WIDGETS ----------
     if "__prefill" in st.session_state and isinstance(st.session_state["__prefill"], dict):
@@ -187,9 +186,15 @@ def render(config):
             st.warning("Adresse introuvable…")
             return None, None
         with st.spinner("Recherche d'adresse…"):
-            lat, lon = geocode_address(addr)
+            before = len(run_report.provider_warnings)
+            lat, lon, provider_used = geocode_address_fallback(addr, report=run_report)
         if lat is None:
-            st.warning("Adresse introuvable…")
+            if len(run_report.provider_warnings) > before:
+                st.error(run_report.provider_warnings[-1])
+            else:
+                st.warning("Adresse introuvable…")
+        elif provider_used and provider_used != "Nominatim":
+            st.warning(f"Fallback géocodage: {provider_used} utilisé.")
         st.session_state["geo_lat"] = lat
         st.session_state["geo_lon"] = lon
         return lat, lon
@@ -240,7 +245,7 @@ def render(config):
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
-    api_key = read_local_secret("GOOGLE_MAPS_API_KEY")
+    st.caption(f"POI providers : {_compact_provider_status()}")
     radius_raw = st.session_state.get("radius_m", 1200)
     try:
         radius_m = int(radius_raw)
@@ -258,33 +263,40 @@ def render(config):
     lat_val = _to_float(lat_raw)
     lon_val = _to_float(lon_raw)
 
-    incontournables_items: list[GPlace] = []
-    spots_items: list[GPlace] = []
-    visits_items: list[GPlace] = []
+    incontournables_items: list[POIResult] = []
+    spots_items: list[POIResult] = []
+    visits_items: list[POIResult] = []
+    poi_provider = ""
 
-    if not api_key:
-        st.warning("Clé Google manquante.")
-    elif lat_val is None or lon_val is None:
+    if lat_val is None or lon_val is None:
         st.info("Adresse non géocodée. Lancez la recherche d'adresse avant de charger les lieux.")
     else:
         try:
-            incontournables_items = _load_google_places(
-                "incontournables", api_key, lat_val, lon_val, radius_m, 15
+            poi_results = get_pois(
+                lat_val,
+                lon_val,
+                radius_m,
+                categories=("incontournables", "spots", "visits"),
+                report=run_report,
             )
+            incontournables_items = poi_results.get("incontournables", [])
+            spots_items = poi_results.get("spots", [])
+            visits_items = poi_results.get("visits", [])
+            for bucket in (incontournables_items, spots_items, visits_items):
+                if bucket:
+                    poi_provider = bucket[0].provider
+                    break
         except Exception as exc:
-            st.warning(f"Incontournables non chargés: {exc}")
-        try:
-            spots_items = _load_google_places("spots", api_key, lat_val, lon_val, radius_m, 10)
-        except Exception as exc:
-            st.warning(f"Spots non chargés: {exc}")
-        try:
-            visits_items = _load_google_places("visits", api_key, lat_val, lon_val, radius_m, 10)
-        except Exception as exc:
-            st.warning(f"Visites non chargées: {exc}")
+            run_report.add_provider_warning(f"POI indisponibles: {exc}", blocking=True)
+            st.error(f"Impossible de charger les lieux automatiquement: {exc}")
 
-    st.caption("source: Google Places")
+    if run_report.provider_warnings:
+        st.warning(" / ".join(run_report.provider_warnings[-2:]))
+    st.caption(f"source: {poi_provider or 'Auto (fallback)'}")
+    if lat_val is not None and lon_val is not None and not (incontournables_items or spots_items or visits_items):
+        st.error("Aucun fournisseur POI disponible : saisissez manuellement les lieux clés.")
 
-    def _select_places(label: str, items: list[GPlace], keys: Iterable[str]) -> list[str]:
+    def _select_places(label: str, items: list[POIResult], keys: Iterable[str]) -> list[str]:
         key_list = list(keys)
         max_selection = len(key_list)
         if not items:
@@ -312,7 +324,7 @@ def render(config):
             label,
             options=options,
             default=default_indices[:max_selection],
-            format_func=lambda idx: f"{items[idx].name} ({round(items[idx].distance_m)} m)",
+            format_func=lambda idx: f"{items[idx].name} ({round(items[idx].distance_m or 0)} m)",
         )
         selection = selection[:max_selection]
         chosen_names = [items[idx].name for idx in selection]
@@ -364,6 +376,7 @@ def render(config):
                         service = WikiImageService()
                         candidates = service.candidates(title=title_value, city=None, country=None, limit=5)
                     except Exception as exc:
+                        run_report.add_provider_warning(f"Wikimedia images indisponibles: {exc}")
                         st.warning(f"Images indisponibles: {exc}")
                     else:
                         st.session_state[f"{slot}_candidates"] = [cand.to_dict() for cand in candidates]
@@ -391,6 +404,7 @@ def render(config):
                     try:
                         path = WikiImageService().download(chosen.url)
                     except Exception as exc:
+                        run_report.add_provider_warning(f"Téléchargement image Wikimedia impossible: {exc}")
                         st.warning(f"Téléchargement impossible: {exc}")
                     else:
                         st.session_state[f"{slot}_img_path"] = path
@@ -646,7 +660,7 @@ def render(config):
             st.error(f"Graphique estimation indisponible: {exc}")
             st.stop()
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        report = generate_estimation_pptx(
+        generation_report = generate_estimation_pptx(
             est_tpl_path,
             pptx_out,
             mapping,
@@ -656,16 +670,17 @@ def render(config):
         )
         if validation_result and validation_result.notes:
             for note in validation_result.notes:
-                report.add_note(note)
+                generation_report.add_note(note)
+        generation_report.merge(run_report)
         if strict_mode and validation_result and validation_result.severity == "KO":
             st.error("Génération bloquée : le template n'est pas valide en mode strict.")
-        elif strict_mode and not report.ok:
+        elif strict_mode and not generation_report.ok:
             st.error("Génération interrompue : le rapport signale des éléments bloquants.")
         else:
             st.success(f"OK: {pptx_out}")
             with open(pptx_out, "rb") as f:
                 st.download_button("Télécharger le PPTX", data=f.read(), file_name=os.path.basename(pptx_out))
-        render_generation_report(report, strict=strict_mode)
+        render_generation_report(generation_report, strict=strict_mode)
 
     # =====================================================
     # =============== MANDAT PAGE =========================

@@ -9,6 +9,8 @@ try:
 except Exception:  # pragma: no cover - tomllib indisponible
     tomllib = None  # type: ignore[assignment]
 
+from app.services.provider_status import get_provider_status
+
 
 # Ecriture TOML simple sans dépendance externe
 
@@ -142,6 +144,23 @@ def render(config):  # type: ignore[override]
             st.success("Clé enregistrée localement (~/.mfy_local_app/secrets.toml). Relancez la page.")
         else:
             st.warning("Aucune valeur saisie.")
+
+    st.markdown("---")
+    st.subheader("Statut des fournisseurs")
+    status = get_provider_status()
+    table = []
+    for name, info in status.items():
+        table.append(
+            {
+                "Fournisseur": name,
+                "Actif": "✅" if info.get("enabled") else "❌",
+                "Clé": "✅" if info.get("has_key") else "❌",
+                "Source": info.get("key_source", "missing"),
+                "Notes": info.get("notes", ""),
+            }
+        )
+    if table:
+        st.table(table)
 
 
 __all__ = ["render", "read_local_secret", "write_local_secret"]
