@@ -2,7 +2,9 @@ from app.services import geocoding_fallback
 from app.services.generation_report import GenerationReport
 
 
-def test_geocode_fallback_geoapify(monkeypatch):
+def test_geocode_fallback_empties_trigger_next_provider(monkeypatch):
+    called = {"geoapify": False}
+
     monkeypatch.setattr(
         geocoding_fallback,
         "geocode_nominatim",
@@ -11,7 +13,7 @@ def test_geocode_fallback_geoapify(monkeypatch):
     monkeypatch.setattr(
         geocoding_fallback,
         "_geocode_geoapify",
-        lambda addr, key, http_get: (10.0, 20.0),
+        lambda addr, key, http_get: called.__setitem__("geoapify", True) or (42.0, 2.0),
     )
 
     def _fake_resolve(name: str):
@@ -22,8 +24,9 @@ def test_geocode_fallback_geoapify(monkeypatch):
     monkeypatch.setattr(geocoding_fallback, "resolve_api_key", _fake_resolve)
 
     report = GenerationReport()
-    lat, lon, provider = geocoding_fallback.geocode_address_fallback("addr", report=report)
+    lat, lon, provider = geocoding_fallback.geocode_address_fallback("10 rue test", report=report)
 
-    assert (lat, lon) == (10.0, 20.0)
+    assert (lat, lon) == (42.0, 2.0)
     assert provider == "Geoapify"
-    assert any("Fallback géocodage" in warn for warn in report.provider_warnings)
+    assert called["geoapify"] is True
+    assert any("Nominatim n'a retourné aucun résultat." in warn for warn in report.provider_warnings)

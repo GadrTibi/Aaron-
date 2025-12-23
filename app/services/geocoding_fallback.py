@@ -8,7 +8,7 @@ from typing import Callable, Tuple
 import requests
 
 from app.services.generation_report import GenerationReport
-from app.services.geocode import geocode_address as geocode_nominatim
+from app.services.geocode import DEFAULT_TIMEOUT, _user_agent, geocode_address as geocode_nominatim
 from app.services.provider_status import resolve_api_key
 
 LOGGER = logging.getLogger(__name__)
@@ -62,45 +62,71 @@ def geocode_address_fallback(
     fallbacks are triggered or errors occur.
     """
 
+    if not address or not address.strip():
+        raise ValueError("Adresse vide pour le géocodage")
+
     http = http_get or requests.get
     rep = report or GenerationReport()
     providers_order = ["Nominatim", "Geoapify", "Google"]
     tried: list[str] = []
+    ua = _user_agent()
 
     # 1) Nominatim (existing helper)
     try:
-        lat, lon = geocode_nominatim(address)
+        lat, lon = geocode_nominatim(
+            address,
+            http_get=http,
+            user_agent=ua,
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "HTTP"
+        rep.add_provider_warning(f"Nominatim HTTP {status}: {exc}")
+        lat, lon = None, None
+    except requests.Timeout as exc:
+        rep.add_provider_warning(f"Nominatim timeout: {exc}")
+        lat, lon = None, None
     except Exception as exc:  # pragma: no cover - defensive guard
         rep.add_provider_warning(f"Nominatim échec: {exc}")
         lat, lon = None, None
     if lat is not None and lon is not None:
         return lat, lon, providers_order[0]
+    if not rep.provider_warnings or not rep.provider_warnings[-1].startswith("Nominatim"):
+        rep.add_provider_warning("Nominatim n'a retourné aucun résultat.")
     tried.append("Nominatim")
 
     # 2) Geoapify
     geo_key, source_geo = resolve_api_key("GEOAPIFY_API_KEY")
     if geo_key:
+        geoapify_failed = False
         try:
             lat, lon = _geocode_geoapify(address, geo_key, http)
         except Exception as exc:
             rep.add_provider_warning(f"Geoapify géocodage indisponible ({source_geo}): {exc}")
             lat, lon = None, None
+            geoapify_failed = True
         if lat is not None and lon is not None:
             rep.add_provider_warning("Fallback géocodage: Geoapify utilisé après Nominatim.")
             return lat, lon, providers_order[1]
+        if not geoapify_failed:
+            rep.add_provider_warning("Geoapify n'a retourné aucun résultat.")
         tried.append("Geoapify")
 
     # 3) Google
     g_key, source_g = resolve_api_key("GOOGLE_MAPS_API_KEY")
     if g_key:
+        google_failed = False
         try:
             lat, lon = _geocode_google(address, g_key, http)
         except Exception as exc:
             rep.add_provider_warning(f"Google géocodage indisponible ({source_g}): {exc}")
             lat, lon = None, None
+            google_failed = True
         if lat is not None and lon is not None:
             rep.add_provider_warning("Fallback géocodage: Google utilisé après échecs précédents.")
             return lat, lon, providers_order[2]
+        if not google_failed:
+            rep.add_provider_warning("Google n'a retourné aucun résultat.")
         tried.append("Google")
 
     if not tried:

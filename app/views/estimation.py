@@ -180,30 +180,63 @@ def render(config):
             return legacy_est
         return os.path.join(EST_TPL_DIR, label)
 
-    def _geocode_main_address():
-        addr = st.session_state.get("bien_addr", "")
+    geocode_debug = st.checkbox("Debug géocodage", key="geocode_debug_toggle")
+
+    def _geocode_main_address(show_debug: bool = False):
+        addr_raw = st.session_state.get("bien_addr", "") or ""
+        addr = addr_raw.strip()
         if not addr:
-            st.warning("Adresse introuvable…")
-            return None, None
-        with st.spinner("Recherche d'adresse…"):
-            before = len(run_report.provider_warnings)
-            lat, lon, provider_used = geocode_address_fallback(addr, report=run_report)
-        if lat is None:
-            if len(run_report.provider_warnings) > before:
-                st.error(run_report.provider_warnings[-1])
+            st.error("Adresse manquante pour le géocodage.")
+            st.session_state["geo_lat"] = None
+            st.session_state["geo_lon"] = None
+            st.session_state["geocode_provider"] = ""
+            return None, None, ""
+
+        last_warning_before = len(run_report.provider_warnings)
+        with st.spinner("Géocodage…"):
+            try:
+                lat, lon, provider_used = geocode_address_fallback(addr, report=run_report)
+            except ValueError as exc:
+                st.error(str(exc))
+                st.session_state["geo_lat"] = None
+                st.session_state["geo_lon"] = None
+                st.session_state["geocode_provider"] = ""
+                return None, None, ""
+            except Exception as exc:
+                st.error(f"Géocodage impossible: {exc}")
+                st.session_state["geo_lat"] = None
+                st.session_state["geo_lon"] = None
+                st.session_state["geocode_provider"] = ""
+                return None, None, ""
+
+        last_warning = run_report.provider_warnings[-1] if run_report.provider_warnings else None
+        if lat is None or lon is None:
+            if last_warning and len(run_report.provider_warnings) > last_warning_before:
+                st.error(f"Géocodage échoué: {last_warning}")
             else:
-                st.warning("Adresse introuvable…")
-        elif provider_used and provider_used != "Nominatim":
-            st.warning(f"Fallback géocodage: {provider_used} utilisé.")
+                st.error("Géocodage échoué: adresse introuvable.")
+        else:
+            provider_label = provider_used or "Nominatim"
+            st.success(f"Adresse géocodée via {provider_label}: {lat}, {lon}")
+            if provider_used and provider_used != "Nominatim":
+                st.warning(f"Fallback géocodage: {provider_used} utilisé.")
         st.session_state["geo_lat"] = lat
         st.session_state["geo_lon"] = lon
-        return lat, lon
+        st.session_state["geocode_provider"] = (provider_used or "Nominatim") if (lat is not None and lon is not None) else ""
+
+        if show_debug:
+            st.info("Debug géocodage activé :")
+            st.write(f"Adresse envoyée: {addr}")
+            st.write(f"Provider utilisé/principal: {provider_used or 'Nominatim'}")
+            if run_report.provider_warnings:
+                st.warning(" / ".join(run_report.provider_warnings[-3:]))
+        return lat, lon, provider_used
 
     # ---- Quartier & transports (Slide 4) ----
     st.subheader("Quartier (Slide 4)")
     quartier_texte = st.text_area("Texte d'intro du quartier (paragraphe)", st.session_state.get("q_txt", "Texte libre saisi par l'utilisateur."), key="q_txt")
     if st.button("Remplir Transports (auto)"):
-        lat, lon = _geocode_main_address()
+        lat, lon, provider_used = _geocode_main_address(show_debug=geocode_debug)
         if lat is not None:
             try:
                 radius_raw = st.session_state.get("radius_m", 1200)

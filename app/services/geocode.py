@@ -4,44 +4,57 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Callable
 
 import requests
 
 LOGGER = logging.getLogger(__name__)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-DEFAULT_USER_AGENT = "MFYLocalApp/1.0 (+https://github.com/Aaron-/MFY-Local-App)"
+DEFAULT_USER_AGENT = "MFY-Local-App/1.0"
+DEFAULT_TIMEOUT = 10
 
 
-def _headers() -> dict[str, str]:
-    """Return headers accepted by the public Nominatim API.
+def _user_agent(custom_ua: str | None = None) -> str:
+    """Return a stable User-Agent accepted by the public Nominatim API.
 
     The service requires a meaningful User-Agent that includes contact info.
-    Users can override it with the ``MFY_NOMINATIM_USER_AGENT`` or the more
-    generic ``MFY_HTTP_USER_AGENT`` environment variable.
+    Users can override it with ``MFY_USER_AGENT`` and we also keep backwards
+    compatibility with ``MFY_NOMINATIM_USER_AGENT`` / ``MFY_HTTP_USER_AGENT``.
     """
 
-    ua = os.getenv("MFY_NOMINATIM_USER_AGENT") or os.getenv("MFY_HTTP_USER_AGENT")
-    if not ua:
-        ua = DEFAULT_USER_AGENT
-    return {"User-Agent": ua}
+    return (
+        custom_ua
+        or os.getenv("MFY_USER_AGENT")
+        or os.getenv("MFY_NOMINATIM_USER_AGENT")
+        or os.getenv("MFY_HTTP_USER_AGENT")
+        or DEFAULT_USER_AGENT
+    )
 
 
-def geocode_address(q: str) -> tuple[float | None, float | None]:
-    """Return latitude/longitude for an address or ``(None, None)`` on failure."""
+def _headers(user_agent: str | None = None) -> dict[str, str]:
+    return {"User-Agent": _user_agent(user_agent)}
+
+
+def geocode_address(
+    q: str,
+    *,
+    http_get: Callable[..., requests.Response] | None = None,
+    user_agent: str | None = None,
+    timeout: float | int = DEFAULT_TIMEOUT,
+) -> tuple[float | None, float | None]:
+    """Return latitude/longitude for an address or ``(None, None)`` on failure.
+
+    Errors are allowed to propagate so that callers can decide whether to
+    trigger a fallback or display richer diagnostics.
+    """
 
     if not q or not q.strip():
-        return (None, None)
+        raise ValueError("Adresse vide ou invalide pour le géocodage")
 
     params = {"q": q, "format": "json", "limit": 1, "addressdetails": 0}
-    try:
-        response = requests.get(NOMINATIM_URL, params=params, headers=_headers(), timeout=20)
-        response.raise_for_status()
-    except requests.HTTPError as exc:  # pragma: no cover - network failures depend on env
-        LOGGER.warning("Nominatim rejected query %s: %s", q, exc)
-        return (None, None)
-    except requests.RequestException as exc:  # pragma: no cover - network failures depend on env
-        LOGGER.warning("Nominatim request failed for %s: %s", q, exc)
-        return (None, None)
+    http = http_get or requests.get
+    response = http(NOMINATIM_URL, params=params, headers=_headers(user_agent), timeout=timeout)
+    response.raise_for_status()
 
     data = response.json()
     if not data:

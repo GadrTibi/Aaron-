@@ -128,9 +128,13 @@ def render(config: dict) -> None:
         addr = st.session_state.get("bien_addr") or st.session_state.get("bk_adresse", "")
         if not addr:
             st.warning("Adresse introuvable…")
-            return None, None
+            return None, None, ""
         with st.spinner("Recherche d'adresse…"):
-            lat, lon, provider_used = geocode_address_fallback(addr, report=run_report)
+            try:
+                lat, lon, provider_used = geocode_address_fallback(addr, report=run_report)
+            except ValueError as exc:
+                st.error(str(exc))
+                return None, None, ""
         if lat is None:
             if run_report.provider_warnings:
                 st.error(run_report.provider_warnings[-1])
@@ -140,10 +144,10 @@ def render(config: dict) -> None:
             st.warning(f"Fallback géocodage: {provider_used} utilisé.")
         st.session_state["geo_lat"] = lat
         st.session_state["geo_lon"] = lon
-        return lat, lon
+        return lat, lon, provider_used
 
     if st.button("Remplir transports automatiquement"):
-        lat, lon = _geocode_main_address()
+        lat, lon, _ = _geocode_main_address()
         if lat is not None:
             try:
                 radius = st.session_state.get("radius_m", 1200)
