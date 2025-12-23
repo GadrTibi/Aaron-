@@ -1,0 +1,310 @@
+{
+  "generated_at": "2025-12-23T12:44:00Z",
+  "entrypoints": [
+    {"path": "run_app.py", "role": "Lance Streamlit avec espaces utilisateur persistants (Documents/MFY-App) et exporte les MFY_*."},
+    {"path": "app/main.py", "role": "Entrée Streamlit (pages Estimation, Mandat, Book, Paramètres)."}
+  ],
+  "pages": [
+    {
+      "name": "Estimation",
+      "path": "app/views/estimation.py",
+      "responsibilities": [
+        "Gestion des templates PPTX Estimation",
+        "Géocodage + transports + POI (Google Places)",
+        "Sélection/téléchargement images visites + carte OSM",
+        "Calcul revenus et histogramme",
+        "Génération du PPTX d’estimation"
+      ],
+      "calls_into": [
+        "app.services.geocode.geocode_address",
+        "services.transports_v3.TransportService.get",
+        "services.places_google.GooglePlacesService.list_incontournables",
+        "app.services.plots.build_estimation_histo",
+        "app.services.pptx_fill.generate_estimation_pptx",
+        "services.wiki_images.WikiImageService.candidates",
+        "services.image_uploads.save_uploaded_image",
+        "app.services.map_image.build_static_map"
+      ]
+    },
+    {
+      "name": "Mandat",
+      "path": "app/views/mandat.py",
+      "responsibilities": [
+        "Upload/choix des templates DOCX",
+        "Saisie des compléments mandat (dates, commissions, options)",
+        "Génération du DOCX mandat"
+      ],
+      "calls_into": [
+        "app.services.mandat_tokens.build_mandat_mapping",
+        "app.services.docx_fill.generate_docx_from_template"
+      ]
+    },
+    {
+      "name": "Book",
+      "path": "app/views/book.py",
+      "responsibilities": [
+        "Upload/choix des templates Book PPTX",
+        "Transports via Overpass (taxi/métro/bus)",
+        "Instructions d’accès + photos + Wi-Fi",
+        "Génération Book PPTX ou PDF léger"
+      ],
+      "calls_into": [
+        "app.services.poi.fetch_transports",
+        "app.services.poi.list_metro_lines",
+        "app.services.poi.list_bus_lines",
+        "app.services.map_image.build_static_map",
+        "app.services.book_tokens.build_book_mapping",
+        "app.services.pptx_fill.generate_book_pptx",
+        "app.services.book_pdf.build_book_pdf"
+      ]
+    },
+    {
+      "name": "Settings",
+      "path": "app/views/settings_keys.py",
+      "responsibilities": [
+        "Lecture/écriture locales des clés",
+        "Priorisation env vs secrets.toml vs Streamlit"
+      ],
+      "calls_into": [
+        "app.views.settings_keys.read_local_secret",
+        "app.views.settings_keys.write_local_secret"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "path": "app/main.py",
+      "purpose": "Initialise la config, crée les répertoires MFY_* et route vers les pages Streamlit.",
+      "public_api": [
+        {"name": "CONFIG", "signature": "dict[str,str]", "side_effects": ["disk", "env", "streamlit"], "depends_on": ["os.environ", "app.views.*.render"]}
+      ]
+    },
+    {
+      "path": "app/views/estimation.py",
+      "purpose": "Page Estimation : collecte UI, POI, transports, revenus, images et génère le PPTX.",
+      "public_api": [
+        {"name": "render", "signature": "render(config: dict)", "side_effects": ["streamlit", "network", "disk"], "depends_on": ["services.transports_v3.TransportService", "services.places_google.GooglePlacesService", "app.services.*"]}
+      ]
+    },
+    {
+      "path": "app/views/mandat.py",
+      "purpose": "Page Mandat : UI minimale et génération du DOCX mandat.",
+      "public_api": [
+        {"name": "render", "signature": "render(config: dict)", "side_effects": ["streamlit", "disk"], "depends_on": ["app.services.mandat_tokens.build_mandat_mapping", "app.services.docx_fill.generate_docx_from_template"]}
+      ]
+    },
+    {
+      "path": "app/views/book.py",
+      "purpose": "Page Book : transports Overpass, instructions d’accès, images d’accès, génération PPTX/PDF.",
+      "public_api": [
+        {"name": "render", "signature": "render(config: dict)", "side_effects": ["streamlit", "network", "disk"], "depends_on": ["app.services.poi.*", "app.services.map_image.build_static_map", "app.services.pptx_fill.generate_book_pptx"]}
+      ]
+    },
+    {
+      "path": "app/views/settings_keys.py",
+      "purpose": "Lecture/écriture des secrets locaux Google Maps et fallback env/secrets.toml.",
+      "public_api": [
+        {"name": "read_local_secret", "signature": "read_local_secret(name: str, default='') -> str", "side_effects": ["env", "disk", "streamlit"], "depends_on": ["os.getenv", "tomllib", "streamlit.secrets"]},
+        {"name": "write_local_secret", "signature": "write_local_secret(name: str, value: str) -> None", "side_effects": ["disk"], "depends_on": ["pathlib.Path"]},
+        {"name": "render", "signature": "render(config)", "side_effects": ["streamlit", "disk"], "depends_on": ["read_local_secret", "write_local_secret"]}
+      ]
+    },
+    {
+      "path": "app/services/pptx_fill.py",
+      "purpose": "Remplacement de tokens texte, insertion d’images/mask et histogramme dans les PPTX.",
+      "public_api": [
+        {"name": "generate_estimation_pptx", "signature": "(template_path, output_path, mapping, chart_image=None, image_by_shape=None)", "side_effects": ["disk"], "depends_on": ["pptx.Presentation", "app.services.pptx_images.inject_tagged_image"]},
+        {"name": "generate_book_pptx", "signature": "(template_path, output_path, mapping, image_by_shape=None)", "side_effects": ["disk"], "depends_on": ["pptx.Presentation", "services.pptx_links.add_hyperlink_to_text"]}
+      ]
+    },
+    {
+      "path": "app/services/docx_fill.py",
+      "purpose": "Remplacement de tokens dans DOCX et sauvegarde.",
+      "public_api": [
+        {"name": "generate_docx_from_template", "signature": "(template_path, output_path, mapping)", "side_effects": ["disk"], "depends_on": ["docx.Document"]}
+      ]
+    },
+    {
+      "path": "app/services/plots.py",
+      "purpose": "Génère l’histogramme de prix/nuitée (PNG).",
+      "public_api": [
+        {"name": "build_estimation_histo", "signature": "(base_nightly_price: float) -> str", "side_effects": ["disk"], "depends_on": ["matplotlib.pyplot"]}
+      ]
+    },
+    {
+      "path": "app/services/geocode.py",
+      "purpose": "Géocodage d’adresse via Nominatim OSM.",
+      "public_api": [
+        {"name": "geocode_address", "signature": "(q: str) -> tuple[float|None,float|None]", "side_effects": ["network"], "depends_on": ["requests.get"]}
+      ]
+    },
+    {
+      "path": "app/services/map_image.py",
+      "purpose": "Rendu carte statique OSM avec cercle et pin.",
+      "public_api": [
+        {"name": "build_static_map", "signature": "(lat: float, lon: float, pixel_radius=60, size=(900,900)) -> str", "side_effects": ["network", "disk"], "depends_on": ["staticmap.StaticMap", "PIL.Image"]}
+      ]
+    },
+    {
+      "path": "services/places_google.py",
+      "purpose": "POI via Google Places API v1 (incontournables/spots/visites).",
+      "public_api": [
+        {"name": "GooglePlacesService.list_incontournables", "signature": "(lat, lon, radius_m, limit=15) -> list[GPlace]", "side_effects": ["network"], "depends_on": ["requests.post"]},
+        {"name": "GooglePlacesService.list_spots", "signature": "(lat, lon, radius_m, limit=10) -> list[GPlace]", "side_effects": ["network"], "depends_on": ["requests.post"]},
+        {"name": "GooglePlacesService.list_visits", "signature": "(lat, lon, radius_m, limit=10) -> list[GPlace]", "side_effects": ["network"], "depends_on": ["requests.post"]}
+      ]
+    },
+    {
+      "path": "services/transports_v3.py",
+      "purpose": "Agrégation transports (GTFS local, OSM Overpass, Google Places).",
+      "public_api": [
+        {"name": "TransportService.get", "signature": "(lat: float, lon: float, radius_m=1200) -> TransportResult", "side_effects": ["network", "disk"], "depends_on": ["GTFSProvider", "OSMProvider", "GoogleProvider"]}
+      ]
+    },
+    {
+      "path": "app/services/poi.py",
+      "purpose": "Transports et POI via Overpass (taxi/métro/bus) avec cache Streamlit.",
+      "public_api": [
+        {"name": "fetch_transports", "signature": "(lat, lon, radius_m=1500) -> (list, debug)", "side_effects": ["network"], "depends_on": ["app.services.overpass_client.query_overpass"]},
+        {"name": "list_metro_lines", "signature": "(lat, lon, radius_m=1200, limit=3)", "side_effects": ["network"], "depends_on": ["query_overpass"]},
+        {"name": "list_bus_lines", "signature": "(lat, lon, radius_m=1200, limit=3)", "side_effects": ["network"], "depends_on": ["query_overpass"]}
+      ]
+    },
+    {
+      "path": "app/services/image_fetcher.py",
+      "purpose": "Cascade d’images POI (Unsplash → Pexels → Wikimedia) avec log détaillé.",
+      "public_api": [
+        {"name": "get_poi_image", "signature": "(poi_name, city=None, country=None) -> str", "side_effects": ["network", "disk", "log"], "depends_on": ["requests", "Pillow", "app.services.http_fetch.download_binary"]},
+        {"name": "debug_fetch_poi", "signature": "(poi_name, city=None, country=None) -> (path, attempts)", "side_effects": ["network", "disk"], "depends_on": ["requests"]},
+        {"name": "get_last_result", "signature": "() -> ProviderAttempt|None", "side_effects": [], "depends_on": []}
+      ]
+    },
+    {
+      "path": "services/wiki_images.py",
+      "purpose": "Recherche d’images via Wikidata/Wikimedia Commons pour les visites.",
+      "public_api": [
+        {"name": "WikiImageService.candidates", "signature": "(title, city, country, limit=5) -> list[ImageCandidate]", "side_effects": ["network", "disk"], "depends_on": ["requests.Session"]},
+        {"name": "WikiImageService.download", "signature": "(url: str|None) -> str", "side_effects": ["network", "disk"], "depends_on": ["requests.Session.get"]}
+      ]
+    },
+    {
+      "path": "services/image_uploads.py",
+      "purpose": "Sauvegarde et sécurisation minimale des uploads d’images utilisateur.",
+      "public_api": [
+        {"name": "save_uploaded_image", "signature": "(file, prefix, dest_dir='out/images/visits') -> str", "side_effects": ["disk"], "depends_on": ["PIL.Image"]}
+      ]
+    }
+  ],
+  "external_providers": [
+    {
+      "name": "Google Places",
+      "where_used": ["services/places_google.py:1-210", "app/views/estimation.py:15-64", "services/transports_v3.py:158-214"],
+      "api_key_env": ["GOOGLE_MAPS_API_KEY"],
+      "timeouts": "10s post, retries exponential",
+      "retry": "2 retries in _post_json",
+      "cache": {"enabled": true, "location": "streamlit cache _load_google_places", "keying": "lat/lon/radius/category"}
+    },
+    {
+      "name": "Geoapify Places",
+      "where_used": ["services/places_geoapify.py:1-170"],
+      "api_key_env": ["GEOAPIFY_API_KEY"],
+      "timeouts": "places_settings.HTTP_TIMEOUT (10s)",
+      "retry": "places_settings.RETRIES (2) with backoff",
+      "cache": {"enabled": true, "location": "out/cache/places", "keying": "lat/lon/radius/category/limit"}
+    },
+    {
+      "name": "OpenTripMap",
+      "where_used": ["config/places_settings.py"],
+      "api_key_env": ["OPENTRIPMAP_API_KEY"],
+      "timeouts": "places_settings.HTTP_TIMEOUT",
+      "retry": "places_settings.RETRIES",
+      "cache": {"enabled": true, "location": "out/cache/places", "keying": "service key"}
+    },
+    {
+      "name": "Overpass (OSM)",
+      "where_used": ["app/services/poi.py:1-210", "services/transports_v3.py:83-160", "app/services/overpass_client.py:1-120"],
+      "api_key_env": [],
+      "timeouts": "25s per request, status polling 3s",
+      "retry": "mirror rotation + 2 retries with jitter",
+      "cache": {"enabled": true, "location": "streamlit cache for poi functions", "keying": "lat/lon/radius"}
+    },
+    {
+      "name": "Nominatim (OSM)",
+      "where_used": ["app/services/geocode.py:20-51"],
+      "api_key_env": [],
+      "timeouts": "20s",
+      "retry": "none (single request)",
+      "cache": {"enabled": false, "location": "none", "keying": "n/a"}
+    },
+    {
+      "name": "Unsplash",
+      "where_used": ["app/services/image_fetcher.py:90-143"],
+      "api_key_env": ["UNSPLASH_ACCESS_KEY"],
+      "timeouts": "8s",
+      "retry": "2 attempts with delays 0.6/1.2s",
+      "cache": {"enabled": false, "location": "images saved in out/images/poi", "keying": "slugified query"}
+    },
+    {
+      "name": "Pexels",
+      "where_used": ["app/services/image_fetcher.py:145-189"],
+      "api_key_env": ["PEXELS_API_KEY"],
+      "timeouts": "8s",
+      "retry": "2 attempts with delays 0.6/1.2s",
+      "cache": {"enabled": false, "location": "images saved in out/images/poi", "keying": "slugified query"}
+    },
+    {
+      "name": "Wikimedia/Wikidata",
+      "where_used": ["services/wiki_images.py:22-160"],
+      "api_key_env": [],
+      "timeouts": "wiki_settings.HTTP_TIMEOUT (10s)",
+      "retry": "wiki_settings.RETRIES (2) with backoff",
+      "cache": {"enabled": true, "location": "out/cache/wiki", "keying": "hash of query/qid"}
+    }
+  ],
+  "config": {
+    "env_vars": [
+      {"name": "GOOGLE_MAPS_API_KEY", "required": false, "used_in": ["app/views/estimation.py:107-151", "services/transports_v3.py:172-214"]},
+      {"name": "UNSPLASH_ACCESS_KEY", "required": false, "used_in": ["app/services/image_fetcher.py:90-143"]},
+      {"name": "PEXELS_API_KEY", "required": false, "used_in": ["app/services/image_fetcher.py:145-189"]},
+      {"name": "GEOAPIFY_API_KEY", "required": false, "used_in": ["services/places_geoapify.py:19-75"]},
+      {"name": "OPENTRIPMAP_API_KEY", "required": false, "used_in": ["config/places_settings.py:4-24"]},
+      {"name": "MFY_TPL_DIR", "required": false, "used_in": ["app/main.py:29-36"]},
+      {"name": "MFY_EST_TPL_DIR", "required": false, "used_in": ["app/main.py:30-36"]},
+      {"name": "MFY_BOOK_TPL_DIR", "required": false, "used_in": ["app/main.py:31-36"]},
+      {"name": "MFY_MAND_TPL_DIR", "required": false, "used_in": ["app/main.py:32-36"]},
+      {"name": "MFY_OUT_DIR", "required": false, "used_in": ["app/main.py:33-36"]},
+      {"name": "MFY_IMG_CACHE_DIR", "required": false, "used_in": ["app/main.py:34-36"]},
+      {"name": "MFY_USER_DIR", "required": false, "used_in": ["app/runtime_paths.py:12-25"]},
+      {"name": "MFY_HTTP_USER_AGENT", "required": false, "used_in": ["app/services/http_fetch.py:1-20", "app/services/geocode.py:27-41"]},
+      {"name": "MFY_NOMINATIM_USER_AGENT", "required": false, "used_in": ["app/services/geocode.py:27-41"]},
+      {"name": "MFY_PORT", "required": false, "used_in": ["run_app.py:13-25"]}
+    ],
+    "files": [
+      {"path": "requirements.txt", "role": "Dépendances Python"},
+      {"path": "pytest.ini", "role": "Configuration des tests"},
+      {"path": "output/", "role": "Export PPTX/DOCX/PDF (créé dynamiquement)"},
+      {"path": "out/plots/", "role": "Graphiques estimation"},
+      {"path": "out/images/", "role": "Images POI/visites/uploads"},
+      {"path": "out/cache/places", "role": "Cache JSON Geoapify/OTM"},
+      {"path": "out/cache/wiki", "role": "Cache JSON Wikimedia"},
+      {"path": "logs/images_debug.log", "role": "Journal pipeline images POI"}
+    ]
+  },
+  "io": {
+    "workspace_roots": ["repo root", "~/Documents/MFY-App (run_app.py)"],
+    "outputs": [
+      {"type": "pptx", "location": "OUT_DIR/Estimation - <addr>.pptx ; OUT_DIR/Book - <addr>.pptx"},
+      {"type": "docx", "location": "OUT_DIR/Mandat - <addr>.docx"},
+      {"type": "pdf", "location": "OUT_DIR/Book - <addr>.pdf"},
+      {"type": "images", "location": "out/images/visits|poi ; IMG_CACHE_DIR"}
+    ],
+    "logs": [
+      {"location": "logs/images_debug.log", "rotation": "none/unknown"}
+    ]
+  },
+  "tests": {
+    "how_to_run": ["pytest -q"],
+    "coverage_hint": "medium",
+    "notably_missing": ["Tests d’intégration Streamlit", "Tests de génération réelle PPTX/DOCX", "Tests réseau pour providers externes"]
+  }
+}
