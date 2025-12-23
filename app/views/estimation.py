@@ -14,7 +14,7 @@ from services.wiki_images import ImageCandidate, WikiImageService
 from services.transports_v3 import TransportService
 
 from .settings_keys import read_local_secret
-from .utils import _sanitize_filename, list_templates
+from .utils import _sanitize_filename, list_templates, render_generation_report
 
 
 @st.cache_data(ttl=120)
@@ -621,16 +621,22 @@ def render(config):
             st.error(f"Graphique estimation indisponible: {exc}")
             st.stop()
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
-        generate_estimation_pptx(
+        strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
+        report = generate_estimation_pptx(
             est_tpl_path,
             pptx_out,
             mapping,
             chart_image=histo_path,
             image_by_shape=image_by_shape or None,
+            strict=strict_mode,
         )
-        st.success(f"OK: {pptx_out}")
-        with open(pptx_out, "rb") as f:
-            st.download_button("Télécharger le PPTX", data=f.read(), file_name=os.path.basename(pptx_out))
+        if strict_mode and not report.ok:
+            st.error("Génération interrompue : le rapport signale des éléments bloquants.")
+        else:
+            st.success(f"OK: {pptx_out}")
+            with open(pptx_out, "rb") as f:
+                st.download_button("Télécharger le PPTX", data=f.read(), file_name=os.path.basename(pptx_out))
+        render_generation_report(report, strict=strict_mode)
 
     # =====================================================
     # =============== MANDAT PAGE =========================

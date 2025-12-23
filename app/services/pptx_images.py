@@ -5,6 +5,8 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Emu
 from PIL import Image, ImageDraw
 
+from app.services.generation_report import GenerationReport
+
 # --- utils: normalisation de libellés ---
 def _norm(s: str) -> str:
     return (s or "").replace("\u00A0", " ").strip().lower()
@@ -67,7 +69,7 @@ def _to_circular_png(src_path: str, size_wh: Tuple[int,int]) -> bytes:
     out.save(bio, format="PNG")
     return bio.getvalue()
 
-def inject_tagged_image(prs: Presentation, tag: str, image_path: str) -> bool:
+def inject_tagged_image(prs: Presentation, tag: str, image_path: str, report: Optional[GenerationReport] = None, *, strict: bool = False) -> bool:
     """
     1) Trouve le shape par nom/alt-text (tag).
     2) Si AUTO_SHAPE -> fill.user_picture(image_path) et return True.
@@ -75,7 +77,12 @@ def inject_tagged_image(prs: Presentation, tag: str, image_path: str) -> bool:
     """
     sh, slide = find_shape_by_tag(prs, tag)
     if not sh or not slide:
-        print(f"[WARN] Shape {tag} introuvable")
+        msg = f"Shape {tag} introuvable"
+        if report is not None:
+            report.add_missing_shapes([tag], blocking=strict)
+            report.add_note(msg)
+        else:
+            print(f"[WARN] {msg}")
         return False
 
     left, top, width, height = _shape_bbox(sh)
@@ -86,7 +93,10 @@ def inject_tagged_image(prs: Presentation, tag: str, image_path: str) -> bool:
             sh.fill.user_picture(image_path)
             try: sh.fill.transparency = 0
             except Exception: pass
-            print(f"[OK] Image injectée avec masque natif dans {tag}")
+            if report is None:
+                print(f"[OK] Image injectée avec masque natif dans {tag}")
+            else:
+                report.add_note(f"Image injectée avec masque natif dans {tag}")
             return True
     except Exception:
         pass
@@ -102,10 +112,18 @@ def inject_tagged_image(prs: Presentation, tag: str, image_path: str) -> bool:
         # écrire PNG temporaire en mémoire
         bio = io.BytesIO(png_bytes)
         slide.shapes.add_picture(bio, left, top, width=width, height=height)
-        print(f"[OK] Image injectée en fallback (PNG circulaire) dans {tag}")
+        if report is None:
+            print(f"[OK] Image injectée en fallback (PNG circulaire) dans {tag}")
+        else:
+            report.add_note(f"Image injectée en fallback (PNG circulaire) dans {tag}")
         return True
     except Exception as e:
-        print(f"[ERR] Fallback PNG circulaire a échoué pour {tag}: {e}")
+        msg = f"Fallback PNG circulaire a échoué pour {tag}: {e}"
+        if report is None:
+            print(f"[ERR] {msg}")
+        else:
+            report.add_missing_images([tag], blocking=strict)
+            report.add_note(msg)
         return False
 
 # Compatibilité : ancien nom

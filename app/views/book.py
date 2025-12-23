@@ -14,7 +14,7 @@ from app.services.map_image import build_static_map
 from app.services.poi import fetch_transports, list_metro_lines, list_bus_lines
 from app.services.pptx_fill import generate_book_pptx
 
-from .utils import _sanitize_filename, list_templates
+from .utils import _sanitize_filename, list_templates, render_generation_report
 
 
 def _format_taxi_summary(items: list[dict]) -> str:
@@ -229,10 +229,15 @@ def render(config: dict) -> None:
                 st.error("Aucun template Book PPTX sélectionné. Déposez/choisissez un template ci-dessus.")
                 st.stop()
             pptx_out = os.path.join(OUT_DIR, f"Book - {st.session_state.get('bien_addr', 'bien')}.pptx")
-            generate_book_pptx(tpl, pptx_out, mapping, image_by_shape=image_by_shape or None)
-            st.success(f"OK: {pptx_out}")
-            with open(pptx_out, "rb") as f:
-                st.download_button("Télécharger le PPTX", data=f.read(), file_name=os.path.basename(pptx_out))
+            strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
+            report = generate_book_pptx(tpl, pptx_out, mapping, image_by_shape=image_by_shape or None, strict=strict_mode)
+            if strict_mode and not report.ok:
+                st.error("Génération interrompue : le rapport signale des éléments bloquants.")
+            else:
+                st.success(f"OK: {pptx_out}")
+                with open(pptx_out, "rb") as f:
+                    st.download_button("Télécharger le PPTX", data=f.read(), file_name=os.path.basename(pptx_out))
+            render_generation_report(report, strict=strict_mode)
     with col2:
         if st.button("Générer le Book (PDF simplifié)"):
             pdf_out = os.path.join(OUT_DIR, f"Book - {st.session_state.get('bien_addr', 'bien')}.pdf")
@@ -246,4 +251,3 @@ def render(config: dict) -> None:
             st.success(f"OK: {pdf_out}")
             with open(pdf_out, "rb") as f:
                 st.download_button("Télécharger le PDF", data=f.read(), file_name=os.path.basename(pdf_out))
-

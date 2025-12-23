@@ -4,6 +4,8 @@ from typing import Dict
 
 from docx import Document
 
+from app.services.generation_report import GenerationReport
+
 
 def _replace_in_paragraph(paragraph, mapping: Dict[str, str]) -> None:
     def rebuild():
@@ -60,15 +62,9 @@ def replace_placeholders_docx(template_path: str, output_path: str, mapping: Dic
     doc.save(output_path)
 
 
-def generate_docx_from_template(template_path: str, output_path: str, mapping: Dict[str, str]) -> None:
-    """Génère un DOCX en remplaçant les tokens et signale ceux restants."""
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Template DOCX introuvable: {template_path}")
-    doc = Document(template_path)
-    _replace_in_document(doc, mapping)
-
+def _collect_leftovers(doc) -> set[str]:
     pat = re.compile(r"«[^»]+»")
-    leftovers = set()
+    leftovers: set[str] = set()
 
     def collect(paragraph) -> None:
         txt = "".join(r.text for r in paragraph.runs)
@@ -81,7 +77,30 @@ def generate_docx_from_template(template_path: str, output_path: str, mapping: D
             for cell in row.cells:
                 for p in cell.paragraphs:
                     collect(p)
+    return leftovers
+
+
+def generate_docx_from_template(
+    template_path: str,
+    output_path: str,
+    mapping: Dict[str, str],
+    *,
+    strict: bool = False,
+) -> GenerationReport:
+    """Génère un DOCX en remplaçant les tokens et signale ceux restants.
+
+    Retourne un GenerationReport pour afficher les warnings dans l'UI.
+    """
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Template DOCX introuvable: {template_path}")
+    doc = Document(template_path)
+    _replace_in_document(doc, mapping)
+
+    leftovers = _collect_leftovers(doc)
 
     doc.save(output_path)
+    report = GenerationReport()
     if leftovers:
-        print("[WARN] Tokens non remplacés (mandat):", sorted(leftovers))
+        report.add_missing_tokens(sorted(leftovers), blocking=strict)
+        report.add_note("Certains tokens n'ont pas été remplacés dans le DOCX.")
+    return report

@@ -5,7 +5,7 @@ import streamlit as st
 
 from app.services.mandat_tokens import build_mandat_mapping
 from app.services.docx_fill import generate_docx_from_template
-from .utils import _sanitize_filename, list_templates
+from .utils import _sanitize_filename, list_templates, render_generation_report
 
 
 def render(config):
@@ -119,9 +119,14 @@ def render(config):
         out_path = os.path.join(
             OUT_DIR, f"Mandat - {st.session_state.get('bien_addr','bien')}.docx"
         )
-        generate_docx_from_template(tpl_path, out_path, mapping)
-        st.success(f"OK : {out_path}")
-        with open(out_path, "rb") as f:
-            st.download_button(
-                "Télécharger le DOCX", data=f.read(), file_name=os.path.basename(out_path)
-            )
+        strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
+        report = generate_docx_from_template(tpl_path, out_path, mapping, strict=strict_mode)
+        if strict_mode and not report.ok:
+            st.error("Génération interrompue : le rapport signale des éléments bloquants.")
+        else:
+            st.success(f"OK : {out_path}")
+            with open(out_path, "rb") as f:
+                st.download_button(
+                    "Télécharger le DOCX", data=f.read(), file_name=os.path.basename(out_path)
+                )
+        render_generation_report(report, strict=strict_mode)

@@ -32,15 +32,15 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
   5. Images visites : `WikiImageService.candidates` + téléchargement ou upload utilisateur. 【app/views/estimation.py†L122-L230】
   6. Carte statique : `build_static_map` (OSM staticmap). 【app/services/map_image.py†L1-L26】
   7. Graphique prix : `build_estimation_histo` génère `out/plots/estimation_histo.png`. 【app/services/plots.py†L49-L117】
-  8. Mapping tokens + images → `generate_estimation_pptx` (remplacement texte + images/mask + histogramme) écrit dans `OUT_DIR/Estimation - <adresse>.pptx`. 【app/services/pptx_fill.py†L90-L170】【app/views/estimation.py†L246-L320】
+  8. Mapping tokens + images → `generate_estimation_pptx` (remplacement texte + images/mask + histogramme) écrit dans `OUT_DIR/Estimation - <adresse>.pptx` et renvoie un `GenerationReport` affiché dans l’UI. 【app/services/pptx_fill.py†L90-L210】【app/views/estimation.py†L246-L320】
 - **Mandat → DOCX**
   1. L’utilisateur sélectionne un modèle DOCX.
   2. `build_mandat_mapping` assemble les données générales + champs spécifiques mandat (dates, destination, commission, pièces, animaux…). 【app/services/mandat_tokens.py†L1-L107】
-  3. `generate_docx_from_template` remplace les tokens et signale ceux restants (stdout), puis écrit `OUT_DIR/Mandat - <adresse>.docx`. 【app/services/docx_fill.py†L39-L83】【app/views/mandat.py†L53-L89】
+  3. `generate_docx_from_template` remplace les tokens, retourne un `GenerationReport` (tokens restants) et écrit `OUT_DIR/Mandat - <adresse>.docx`, affiché dans l’UI Streamlit. 【app/services/docx_fill.py†L39-L100】【app/views/mandat.py†L53-L89】
 - **Book → PPTX/PDF (incomplet)**
   1. Adresse + transports (Overpass via `fetch_transports`, `list_metro_lines`, `list_bus_lines`) ou import depuis l’état Estimation. 【app/services/poi.py†L1-L165】
   2. Instructions d’accès + photos (upload) + Wi‑Fi.
-  3. Carte statique (`build_static_map`) et images accès injectées dans `generate_book_pptx`. PDF alternatif généré par `build_book_pdf` (sections vides par défaut). 【app/services/pptx_fill.py†L172-L226】【app/services/book_pdf.py†L1-L33】
+  3. Carte statique (`build_static_map`) et images accès injectées dans `generate_book_pptx`, qui retourne un `GenerationReport` affiché dans l’UI (tokens/shapes/images manquants). PDF alternatif généré par `build_book_pdf` (sections vides par défaut). 【app/services/pptx_fill.py†L172-L260】【app/services/book_pdf.py†L1-L33】
 
 ## Templates attendus
 - PPTX Estimation : tous les fichiers dans `EST_TPL_DIR` (upload possible via UI) ou héritage `estimation_template.pptx` dans `TPL_DIR`. 【app/views/estimation.py†L96-L121】

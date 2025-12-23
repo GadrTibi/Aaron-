@@ -10,6 +10,7 @@ from PIL import Image
 
 from app.services.pptx_images import inject_tagged_image
 from services.pptx_links import add_hyperlink_to_text
+from app.services.generation_report import GenerationReport
 
 LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ def _walk_shapes(shapes):
                 yield sub
 
 
-def insert_plot_into_pptx(template_path: str, output_path: str, image_path: str) -> None:
+def insert_plot_into_pptx(template_path: str, output_path: str, image_path: str, report: Optional[GenerationReport] = None, *, strict: bool = False) -> None:
     """Insert the histogram image into slide 6 using the dedicated mask shape."""
 
     if not os.path.exists(template_path):
@@ -57,9 +58,12 @@ def insert_plot_into_pptx(template_path: str, output_path: str, image_path: str)
             break
 
     if target_shape is None:
-        raise ValueError(
-            "Shape mask introuvable en slide 6 (attendu: 'ESTIMATION_HISTO_MASK' ou variante '*histo*-mask')."
-        )
+        message = "Shape mask introuvable en slide 6 (attendu: 'ESTIMATION_HISTO_MASK' ou variante '*histo*-mask')."
+        if report is not None:
+            report.add_missing_shapes(["ESTIMATION_HISTO_MASK"], blocking=strict)
+            report.add_note(message)
+            return
+        raise ValueError(message)
 
     left, top, width, height = target_shape.left, target_shape.top, target_shape.width, target_shape.height
 
@@ -126,7 +130,7 @@ def insert_image(slide, image_path: str, left=Inches(1), top=Inches(3), width=In
     slide.shapes.add_picture(image_path, left, top, width=width)
 
 
-def replace_image_by_shape_name(prs, shape_name: str, image_path: str) -> bool:
+def replace_image_by_shape_name(prs, shape_name: str, image_path: str, report: Optional[GenerationReport] = None, *, strict: bool = False) -> bool:
     """Remplace une image en la retrouvant par son nom."""
     try:
         ext = os.path.splitext(image_path)[1].lower()
@@ -149,15 +153,42 @@ def replace_image_by_shape_name(prs, shape_name: str, image_path: str) -> bool:
                     except Exception:
                         pass
                     slide.shapes.add_picture(image_path, left, top, width=width, height=height)
-                    print(f"[OK] Image remplacée dans {shape_name}")
+                    if report is None:
+                        print(f"[OK] Image remplacée dans {shape_name}")
                     return True
             except Exception:
                 continue
 
-    print(f"[WARN] Shape {shape_name} introuvable dans le PPTX.")
+    msg = f"Shape {shape_name} introuvable dans le PPTX."
+    if report is not None:
+        report.add_missing_shapes([shape_name], blocking=strict)
+        report.add_note(msg)
+    else:
+        print(f"[WARN] {msg}")
     return False
 
-def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict[str, str], chart_image: Optional[str]=None, image_by_shape: Optional[Dict[str, str]]=None) -> None:
+
+def _collect_leftover_tokens(prs: Presentation) -> List[str]:
+    pattern = re.compile(r"\[\[[^\]]+\]\]")
+    found: set[str] = set()
+    for slide in prs.slides:
+        for sh in _walk_shapes(slide.shapes):
+            if hasattr(sh, "text_frame") and sh.text_frame:
+                for para in sh.text_frame.paragraphs:
+                    txt = "".join(r.text for r in para.runs)
+                    found.update(pattern.findall(txt))
+    return sorted(found)
+
+def generate_estimation_pptx(
+    template_path: str,
+    output_path: str,
+    mapping: Dict[str, str],
+    chart_image: Optional[str] = None,
+    image_by_shape: Optional[Dict[str, str]] = None,
+    *,
+    strict: bool = False,
+) -> GenerationReport:
+    report = GenerationReport()
     prs = Presentation(template_path)
     for slide in prs.slides:
         replace_text_preserving_style(slide.shapes, mapping)
@@ -167,23 +198,37 @@ def generate_estimation_pptx(template_path: str, output_path: str, mapping: Dict
                 continue
             # MAP_MASK doit toujours être injectée en plein rectangle sans masque
             if shape_name == "MAP_MASK":
-                replace_image_by_shape_name(prs, shape_name, img_path)
+                replace_image_by_shape_name(prs, shape_name, img_path, report, strict=strict)
             # VISITE_1_MASK et VISITE_2_MASK conservent l'injection avec masque circulaire
             elif shape_name in ("VISITE_1_MASK", "VISITE_2_MASK"):
-                inject_tagged_image(prs, shape_name, img_path)
+                inject_tagged_image(prs, shape_name, img_path, report, strict=strict)
             else:
-                replace_image_by_shape_name(prs, shape_name, img_path)
+                replace_image_by_shape_name(prs, shape_name, img_path, report, strict=strict)
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     prs.save(output_path)
 
+    leftovers = _collect_leftover_tokens(prs)
+    if leftovers:
+        report.add_missing_tokens(leftovers, blocking=strict)
+        report.add_note("Des tokens sont restés dans le PPTX.")
+
     if chart_image:
-        insert_plot_into_pptx(output_path, output_path, chart_image)
+        insert_plot_into_pptx(output_path, output_path, chart_image, report, strict=strict)
+    return report
 
 
-def generate_book_pptx(template_path: str, output_path: str, mapping: Dict[str, str], image_by_shape: Optional[Dict[str, str]] = None) -> None:
+def generate_book_pptx(
+    template_path: str,
+    output_path: str,
+    mapping: Dict[str, str],
+    image_by_shape: Optional[Dict[str, str]] = None,
+    *,
+    strict: bool = False,
+) -> GenerationReport:
     """Generate a Book PPTX from template and mapping/images."""
+    report = GenerationReport()
     prs = Presentation(template_path)
     for slide in prs.slides:
         replace_text_preserving_style(slide.shapes, mapping)
@@ -201,7 +246,7 @@ def generate_book_pptx(template_path: str, output_path: str, mapping: Dict[str, 
                 continue
             if shape_name in ("MAP_BOOK_MASK", "BOOK_MAP_MASK"):
                 # Always replace the shape by the map image (full rectangle)
-                replace_image_by_shape_name(prs, shape_name, img_path)
+                replace_image_by_shape_name(prs, shape_name, img_path, report, strict=strict)
             elif shape_name in (
                 "PORTE_ENTREE_MASK",
                 "ENTREE_MASK",
@@ -212,9 +257,14 @@ def generate_book_pptx(template_path: str, output_path: str, mapping: Dict[str, 
                 "BOOK_ACCESS_PHOTO_APPART",
             ):
                 # Try native mask injection first, fallback to rectangle replace
-                ok = inject_tagged_image(prs, shape_name, img_path)
+                ok = inject_tagged_image(prs, shape_name, img_path, report, strict=strict)
                 if not ok:
-                    replace_image_by_shape_name(prs, shape_name, img_path)
+                    replace_image_by_shape_name(prs, shape_name, img_path, report, strict=strict)
             else:
-                replace_image_by_shape_name(prs, shape_name, img_path)
+                replace_image_by_shape_name(prs, shape_name, img_path, report, strict=strict)
+    leftovers = _collect_leftover_tokens(prs)
+    if leftovers:
+        report.add_missing_tokens(leftovers, blocking=strict)
+        report.add_note("Des tokens sont restés dans le PPTX.")
     prs.save(output_path)
+    return report
