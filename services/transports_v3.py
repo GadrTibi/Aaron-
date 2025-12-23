@@ -14,6 +14,7 @@ import requests
 
 from app.services.overpass_client import query_overpass
 from app.views.settings_keys import read_local_secret
+from services.transport_cache import TransportCache
 
 
 @dataclass
@@ -22,6 +23,7 @@ class TransportResult:
     bus_lines: list[str]
     taxis: list[str]
     provider_used: dict[str, str]
+    cache_status: str | None = None
 
 
 def _haversine_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -344,9 +346,10 @@ class GoogleProvider:
 class TransportService:
     """Aggregate transport data from multiple providers."""
 
-    def __init__(self, provider_order: tuple[str, ...] = ("gtfs", "osm", "google")) -> None:
+    def __init__(self, provider_order: tuple[str, ...] = ("gtfs", "osm", "google"), *, cache: TransportCache | None = None) -> None:
         self.provider_order = list(provider_order)
         self.providers: dict[str, object] = {}
+        self.cache = cache or TransportCache()
         for name in {"gtfs", "osm", "google"}:
             if name == "gtfs":
                 self.providers[name] = GTFSProvider()
@@ -399,12 +402,24 @@ class TransportService:
                 break
         return result
 
-    def get(self, lat: float, lon: float, radius_m: int = 1200) -> TransportResult:
+    def get(self, lat: float, lon: float, radius_m: int = 1200, *, use_cache: bool = True) -> TransportResult:
         metro_order = [name for name in self.provider_order if name in {"gtfs", "osm", "google"}]
         if not metro_order:
             metro_order = ["gtfs", "osm", "google"]
         bus_order = metro_order
         taxi_order = ["osm", "google"]
+
+        if use_cache and self.cache:
+            cached = self.cache.get(lat, lon, radius_m, metro_order)
+            if cached:
+                payload = cached or {}
+                return TransportResult(
+                    metro_lines=list(payload.get("metro_lines", [])),
+                    bus_lines=list(payload.get("bus_lines", [])),
+                    taxis=list(payload.get("taxis", [])),
+                    provider_used=dict(payload.get("provider_used", {})),
+                    cache_status="hit",
+                )
 
         metro_lines, metro_provider = self._try_providers(metro_order, "metro", lat, lon, radius_m)
         bus_lines, bus_provider = self._try_providers(bus_order, "bus", lat, lon, radius_m)
@@ -418,11 +433,21 @@ class TransportService:
         if taxi_provider:
             provider_used["taxi"] = taxi_provider
 
+        result = {
+            "metro_lines": metro_lines,
+            "bus_lines": bus_lines,
+            "taxis": taxis,
+            "provider_used": provider_used,
+        }
+        if use_cache and self.cache:
+            self.cache.set(lat, lon, radius_m, metro_order, result)
+
         return TransportResult(
             metro_lines=metro_lines,
             bus_lines=bus_lines,
             taxis=taxis,
             provider_used=provider_used,
+            cache_status="miss",
         )
 
 

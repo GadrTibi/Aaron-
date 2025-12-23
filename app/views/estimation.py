@@ -1,9 +1,12 @@
 import os
+from time import perf_counter
 from typing import Iterable, Optional
 
 import streamlit as st
 
 from app.services.generation_report import GenerationReport
+from app.services.geocode_cache import get_cached_geocode, normalize_address, set_cached_geocode
+from app.services.geocode_flow import should_use_session_cache
 from app.services.geocoding_fallback import geocode_address_fallback
 from app.services.map_image import build_static_map
 from app.services.plots import build_estimation_histo
@@ -185,14 +188,41 @@ def render(config):
     def _geocode_main_address(show_debug: bool = False):
         addr_raw = st.session_state.get("bien_addr", "") or ""
         addr = addr_raw.strip()
+        normalized_addr = normalize_address(addr)
+        st.session_state["geocode_address_norm"] = normalized_addr
+        perf_geocode: dict[str, object] = {}
+
         if not addr:
             st.error("Adresse manquante pour le géocodage.")
             st.session_state["geo_lat"] = None
             st.session_state["geo_lon"] = None
             st.session_state["geocode_provider"] = ""
-            return None, None, ""
+            return None, None, "", perf_geocode
+
+        session_lat = st.session_state.get("geo_lat")
+        session_lon = st.session_state.get("geo_lon")
+        session_addr = st.session_state.get("geocode_address_norm", "")
+
+        if should_use_session_cache(addr, session_addr, session_lat, session_lon):
+            st.info("Utilisation coordonnées en cache session")
+            provider_used = st.session_state.get("geocode_provider", "Nominatim")
+            perf_geocode = {"duration": 0.0, "provider": provider_used, "cache": "session"}
+            run_report.add_note(f"Géocodage via cache session ({provider_used})")
+            return session_lat, session_lon, provider_used, perf_geocode
+
+        cached = get_cached_geocode(addr)
+        if cached:
+            lat, lon, provider_used = cached
+            st.session_state["geo_lat"] = lat
+            st.session_state["geo_lon"] = lon
+            st.session_state["geocode_provider"] = provider_used or "Nominatim"
+            perf_geocode = {"duration": 0.0, "provider": provider_used or "Nominatim", "cache": "disk_hit"}
+            st.info("Coordonnées récupérées depuis le cache disque.")
+            run_report.add_note(f"Géocodage cache disque ({provider_used or 'Nominatim'}).")
+            return lat, lon, provider_used, perf_geocode
 
         last_warning_before = len(run_report.provider_warnings)
+        start = perf_counter()
         with st.spinner("Géocodage…"):
             try:
                 lat, lon, provider_used = geocode_address_fallback(addr, report=run_report)
@@ -201,13 +231,14 @@ def render(config):
                 st.session_state["geo_lat"] = None
                 st.session_state["geo_lon"] = None
                 st.session_state["geocode_provider"] = ""
-                return None, None, ""
+                return None, None, "", perf_geocode
             except Exception as exc:
                 st.error(f"Géocodage impossible: {exc}")
                 st.session_state["geo_lat"] = None
                 st.session_state["geo_lon"] = None
                 st.session_state["geocode_provider"] = ""
-                return None, None, ""
+                return None, None, "", perf_geocode
+        duration = perf_counter() - start
 
         last_warning = run_report.provider_warnings[-1] if run_report.provider_warnings else None
         if lat is None or lon is None:
@@ -218,46 +249,70 @@ def render(config):
         else:
             provider_label = provider_used or "Nominatim"
             st.success(f"Adresse géocodée via {provider_label}: {lat}, {lon}")
+            set_cached_geocode(addr, lat, lon, provider_label)
             if provider_used and provider_used != "Nominatim":
                 st.warning(f"Fallback géocodage: {provider_used} utilisé.")
         st.session_state["geo_lat"] = lat
         st.session_state["geo_lon"] = lon
         st.session_state["geocode_provider"] = (provider_used or "Nominatim") if (lat is not None and lon is not None) else ""
+        perf_geocode = {
+            "duration": duration,
+            "provider": provider_used or "Nominatim",
+            "cache": "network" if lat is not None else "error",
+        }
+        run_report.add_note(f"Géocodage: {duration:.2f}s via {provider_used or 'Nominatim'} ({perf_geocode['cache']}).")
 
         if show_debug:
             st.info("Debug géocodage activé :")
             st.write(f"Adresse envoyée: {addr}")
             st.write(f"Provider utilisé/principal: {provider_used or 'Nominatim'}")
+            st.write(f"Durée: {duration:.2f}s")
+            st.write(f"Cache: {perf_geocode['cache']}")
             if run_report.provider_warnings:
                 st.warning(" / ".join(run_report.provider_warnings[-3:]))
-        return lat, lon, provider_used
+        return lat, lon, provider_used, perf_geocode
 
     # ---- Quartier & transports (Slide 4) ----
     st.subheader("Quartier (Slide 4)")
     quartier_texte = st.text_area("Texte d'intro du quartier (paragraphe)", st.session_state.get("q_txt", "Texte libre saisi par l'utilisateur."), key="q_txt")
+    perf_transports: dict[str, object] = {}
     if st.button("Remplir Transports (auto)"):
-        lat, lon, provider_used = _geocode_main_address(show_debug=geocode_debug)
+        lat, lon, provider_used, perf_geocode = _geocode_main_address(show_debug=geocode_debug)
         if lat is not None:
-            try:
-                radius_raw = st.session_state.get("radius_m", 1200)
+            start_tr = perf_counter()
+            with st.spinner("Chargement des transports…"):
                 try:
-                    radius = int(radius_raw)
-                except (TypeError, ValueError):
-                    radius = 1200
-                service = TransportService()
-                tr = service.get(lat, lon, radius_m=radius)
-                st.session_state["q_tx"] = ", ".join(tr.taxis)
-                st.session_state["metro_lines_auto"] = tr.metro_lines
-                st.session_state["bus_lines_auto"] = tr.bus_lines
-                st.session_state["transport_providers"] = tr.provider_used
-            except Exception as e:
-                st.warning(f"Transports non chargés: {e}")
-                st.session_state['transport_providers'] = {}
+                    radius_raw = st.session_state.get("radius_m", 1200)
+                    try:
+                        radius = int(radius_raw)
+                    except (TypeError, ValueError):
+                        radius = 1200
+                    service = TransportService()
+                    tr = service.get(lat, lon, radius_m=radius, use_cache=True)
+                    st.session_state["q_tx"] = ", ".join(tr.taxis)
+                    st.session_state["metro_lines_auto"] = tr.metro_lines
+                    st.session_state["bus_lines_auto"] = tr.bus_lines
+                    st.session_state["transport_providers"] = tr.provider_used
+                    perf_transports = {
+                        "duration": perf_counter() - start_tr,
+                        "provider": tr.provider_used,
+                        "cache": tr.cache_status or "miss",
+                    }
+                    run_report.add_note(f"Transports: {perf_transports['duration']:.2f}s (cache {perf_transports['cache']}).")
+                except Exception as e:
+                    st.warning(f"Transports non chargés: {e}")
+                    st.session_state['transport_providers'] = {}
         else:
             st.session_state["q_tx"] = ""
             st.session_state['metro_lines_auto'] = []
             st.session_state['bus_lines_auto'] = []
             st.session_state['transport_providers'] = {}
+        if geocode_debug:
+            with st.expander("Détails performance", expanded=True):
+                if perf_geocode:
+                    st.write(f"Géocodage: {perf_geocode.get('duration', 0):.2f}s via {perf_geocode.get('provider', '')} ({perf_geocode.get('cache', '')})")
+                if perf_transports:
+                    st.write(f"Transports: {perf_transports.get('duration', 0):.2f}s cache={perf_transports.get('cache', '')}")
     taxi_txt = st.session_state.get("q_tx", "")
     metro_auto = st.session_state.get('metro_lines_auto', [])
     bus_auto = st.session_state.get('bus_lines_auto', [])

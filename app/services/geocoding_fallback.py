@@ -3,21 +3,32 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Callable, Tuple
 
 import requests
 
 from app.services.generation_report import GenerationReport
-from app.services.geocode import DEFAULT_TIMEOUT, _user_agent, geocode_address as geocode_nominatim
+from app.services.geocode import _user_agent, geocode_address as geocode_nominatim
 from app.services.provider_status import resolve_api_key
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _geocode_geoapify(address: str, api_key: str, http_get: Callable[..., requests.Response]) -> Tuple[float | None, float | None]:
+def _env_timeout(key: str, default: float) -> float:
+    raw = os.getenv(f"MFY_GEOCODE_TIMEOUT_{key}")
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _geocode_geoapify(address: str, api_key: str, http_get: Callable[..., requests.Response], *, timeout: float = 15) -> Tuple[float | None, float | None]:
     url = "https://api.geoapify.com/v1/geocode/search"
     params = {"text": address, "format": "json", "limit": 1, "apiKey": api_key}
-    response = http_get(url, params=params, timeout=15)
+    response = http_get(url, params=params, timeout=timeout)
     response.raise_for_status()
     data = response.json()
     features = data.get("features") or []
@@ -32,10 +43,10 @@ def _geocode_geoapify(address: str, api_key: str, http_get: Callable[..., reques
         return None, None
 
 
-def _geocode_google(address: str, api_key: str, http_get: Callable[..., requests.Response]) -> Tuple[float | None, float | None]:
+def _geocode_google(address: str, api_key: str, http_get: Callable[..., requests.Response], *, timeout: float = 15) -> Tuple[float | None, float | None]:
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": address, "key": api_key}
-    response = http_get(url, params=params, timeout=15)
+    response = http_get(url, params=params, timeout=timeout)
     response.raise_for_status()
     payload = response.json()
     results = payload.get("results") or []
@@ -48,6 +59,20 @@ def _geocode_google(address: str, api_key: str, http_get: Callable[..., requests
         return (float(lat), float(lon)) if lat is not None and lon is not None else (None, None)
     except (TypeError, ValueError):
         return None, None
+
+
+def _nominatim_timeout(has_fallback: bool) -> float:
+    short_timeout = 5.0
+    long_timeout = 14.0
+    return _env_timeout("NOMINATIM", short_timeout if has_fallback else long_timeout)
+
+
+def _geoapify_timeout() -> float:
+    return _env_timeout("GEOAPIFY", 12.0)
+
+
+def _google_timeout() -> float:
+    return _env_timeout("GOOGLE", 12.0)
 
 
 def geocode_address_fallback(
@@ -71,13 +96,17 @@ def geocode_address_fallback(
     tried: list[str] = []
     ua = _user_agent()
 
+    geo_key, source_geo = resolve_api_key("GEOAPIFY_API_KEY")
+    g_key, source_g = resolve_api_key("GOOGLE_MAPS_API_KEY")
+    has_fallback = bool(geo_key or g_key)
+
     # 1) Nominatim (existing helper)
     try:
         lat, lon = geocode_nominatim(
             address,
             http_get=http,
             user_agent=ua,
-            timeout=DEFAULT_TIMEOUT,
+            timeout=_nominatim_timeout(has_fallback),
         )
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else "HTTP"
@@ -96,11 +125,13 @@ def geocode_address_fallback(
     tried.append("Nominatim")
 
     # 2) Geoapify
-    geo_key, source_geo = resolve_api_key("GEOAPIFY_API_KEY")
     if geo_key:
         geoapify_failed = False
         try:
-            lat, lon = _geocode_geoapify(address, geo_key, http)
+            try:
+                lat, lon = _geocode_geoapify(address, geo_key, http, timeout=_geoapify_timeout())
+            except TypeError:
+                lat, lon = _geocode_geoapify(address, geo_key, http)
         except Exception as exc:
             rep.add_provider_warning(f"Geoapify géocodage indisponible ({source_geo}): {exc}")
             lat, lon = None, None
@@ -113,11 +144,13 @@ def geocode_address_fallback(
         tried.append("Geoapify")
 
     # 3) Google
-    g_key, source_g = resolve_api_key("GOOGLE_MAPS_API_KEY")
     if g_key:
         google_failed = False
         try:
-            lat, lon = _geocode_google(address, g_key, http)
+            try:
+                lat, lon = _geocode_google(address, g_key, http, timeout=_google_timeout())
+            except TypeError:
+                lat, lon = _geocode_google(address, g_key, http)
         except Exception as exc:
             rep.add_provider_warning(f"Google géocodage indisponible ({source_g}): {exc}")
             lat, lon = None, None
