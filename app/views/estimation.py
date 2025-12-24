@@ -32,6 +32,9 @@ from .utils import (
 )
 
 
+DEFAULT_RADIUS_M = 300
+
+
 def _restore_candidates(key: str) -> list[ImageCandidate]:
     stored = st.session_state.get(key, [])
     candidates: list[ImageCandidate] = []
@@ -275,6 +278,21 @@ def render(config):
 
     # ---- Quartier & transports (Slide 4) ----
     st.subheader("Quartier & Transports (Slide 4)")
+    radius_default_raw = st.session_state.get("radius_m", DEFAULT_RADIUS_M)
+    try:
+        radius_default = int(radius_default_raw)
+    except (TypeError, ValueError):
+        radius_default = DEFAULT_RADIUS_M
+        st.session_state["radius_m"] = DEFAULT_RADIUS_M
+    st.slider(
+        "Rayon (m)",
+        min_value=300,
+        max_value=3000,
+        value=radius_default,
+        step=100,
+        key="radius_m",
+        help="Distance utilisée pour les lieux et transports.",
+    )
     quartier_intro = st.text_area(
         "Intro quartier (2-3 phrases)",
         st.session_state.get("quartier_intro", "Texte libre saisi par l'utilisateur."),
@@ -340,11 +358,11 @@ def render(config):
                 start_tr = perf_counter()
                 with st.spinner("Chargement des transports…"):
                     try:
-                        radius_raw = st.session_state.get("radius_m", 1200)
+                        radius_raw = st.session_state.get("radius_m", DEFAULT_RADIUS_M)
                         try:
                             radius = int(radius_raw)
                         except (TypeError, ValueError):
-                            radius = 1200
+                            radius = DEFAULT_RADIUS_M
                         warning_count = len(run_report.provider_warnings)
                         tr = get_transports(lat, lon, radius_m=radius, mode=transport_mode, report=run_report)
                         st.session_state["q_tx"] = ", ".join(tr.get("taxis", []))
@@ -389,11 +407,11 @@ def render(config):
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
     st.caption(f"POI providers : {_compact_provider_status()}")
-    radius_raw = st.session_state.get("radius_m", 1200)
+    radius_raw = st.session_state.get("radius_m", DEFAULT_RADIUS_M)
     try:
         radius_m = int(radius_raw)
     except (TypeError, ValueError):
-        radius_m = 1200
+        radius_m = DEFAULT_RADIUS_M
     lat_raw = st.session_state.get("geo_lat")
     lon_raw = st.session_state.get("geo_lon")
 
@@ -587,15 +605,6 @@ def render(config):
 
     _render_visit_column("visite1", "v1", col_v1)
     _render_visit_column("visite2", "v2", col_v2)
-
-    st.slider(
-        "Rayon (m)",
-        min_value=300,
-        max_value=3000,
-        value=st.session_state.get("radius_m", 1200),
-        step=100,
-        key="radius_m",
-    )
 
     # Points forts & Challenges (Slide 5)
     st.subheader("Points forts & Challenges (Slide 5)")

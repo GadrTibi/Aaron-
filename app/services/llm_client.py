@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
+from app.services.provider_status import resolve_api_key
 from app.services.generation_report import GenerationReport
 
 
@@ -15,21 +16,12 @@ REQUEST_TIMEOUT = 30
 
 
 def _get_openai_api_key() -> str:
-    key = os.environ.get("OPENAI_API_KEY")
+    key, _ = resolve_api_key("OPENAI_API_KEY")
     if key:
         return key
-
-    try:
-        import streamlit as st
-
-        secrets = getattr(st, "secrets", None)
-        if secrets and secrets.get("OPENAI_API_KEY"):
-            return str(secrets["OPENAI_API_KEY"])
-    except Exception:
-        # Streamlit non disponible ou secrets inaccessibles : ignorer silencieusement
-        pass
-
-    raise RuntimeError("Clé OpenAI absente (OPENAI_API_KEY). Ajoutez la clé avant de réessayer.")
+    raise RuntimeError(
+        "Clé OpenAI absente (OPENAI_API_KEY). Ajoutez la clé (env, st.secrets ou ~/.mfy_local_app/secrets.toml) puis réessayez."
+    )
 
 
 def invoke_llm_json(prompt: str, schema: Dict[str, Any], report: Optional[GenerationReport] = None) -> Dict[str, Any]:
