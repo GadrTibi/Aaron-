@@ -25,14 +25,15 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
 
 ## Flux de bout en bout
 - **Estimation → PPTX**
-  1. L’utilisateur saisit adresse, caractéristiques, prix nuitée et rayon (UI).
-  2. Géocodage Nominatim (`geocode_address`) stocke lat/lon. 【app/services/geocode.py†L20-L51】
-  3. Transports : `TransportService` agrège GTFS/OSM/Google pour taxis/métro/bus, stocke dans `session_state`. 【services/transports_v3.py†L1-L215】
-  4. POI : `GooglePlacesService` charge incontournables/spots/visites (cache 120 s). 【app/views/estimation.py†L15-L61】
-  5. Images visites : `WikiImageService.candidates` + téléchargement ou upload utilisateur. 【app/views/estimation.py†L122-L230】
-  6. Carte statique : `build_static_map` (OSM staticmap). 【app/services/map_image.py†L1-L26】
-  7. Graphique prix : `build_estimation_histo` génère `out/plots/estimation_histo.png`. 【app/services/plots.py†L49-L117】
-  8. Mapping tokens + images → `generate_estimation_pptx` (remplacement texte + images/mask + histogramme) écrit dans `OUT_DIR/Estimation - <adresse>.pptx` et renvoie un `GenerationReport` affiché dans l’UI. 【app/services/pptx_fill.py†L90-L210】【app/views/estimation.py†L246-L320】
+ 1. L’utilisateur saisit adresse, caractéristiques, prix nuitée et rayon (UI).
+ 2. Géocodage Nominatim (`geocode_address`) stocke lat/lon. 【app/services/geocode.py†L20-L51】
+ 3. Quartier & transports : enrichissement LLM (JSON strict) produit intro quartier + textes métro/bus/taxi, stockés en session et utilisables en manuel si l’appel échoue. 【app/services/quartier_enricher.py†L1-L74】【app/views/estimation.py†L254-L340】
+ 4. Transports legacy (debug) : pipeline GTFS/OSM/Google conservé sous expander. 【app/views/estimation.py†L312-L340】
+ 5. POI : `GooglePlacesService` charge incontournables/spots/visites (cache 120 s). 【app/views/estimation.py†L343-L420】
+ 6. Images visites : `WikiImageService.candidates` + téléchargement ou upload utilisateur. 【app/views/estimation.py†L122-L230】
+ 7. Carte statique : `build_static_map` (OSM staticmap). 【app/services/map_image.py†L1-L26】
+ 8. Graphique prix : `build_estimation_histo` génère `out/plots/estimation_histo.png`. 【app/services/plots.py†L49-L117】
+ 9. Mapping tokens + images → `generate_estimation_pptx` (remplacement texte + images/mask + histogramme) écrit dans `OUT_DIR/Estimation - <adresse>.pptx` et renvoie un `GenerationReport` affiché dans l’UI. 【app/services/pptx_fill.py†L90-L210】【app/views/estimation.py†L246-L320】
 - **Mandat → DOCX**
   1. L’utilisateur sélectionne un modèle DOCX.
   2. `build_mandat_mapping` assemble les données générales + champs spécifiques mandat (dates, destination, commission, pièces, animaux…). 【app/services/mandat_tokens.py†L1-L107】

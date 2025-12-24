@@ -12,6 +12,7 @@ from app.services.map_image import build_static_map
 from app.services.plots import build_estimation_histo
 from app.services.poi_facade import POIResult, get_pois
 from app.services.provider_status import get_provider_status
+from app.services.quartier_enricher import enrich_quartier_and_transports
 from app.services.pptx_fill import generate_estimation_pptx
 from app.services.pptx_requirements import (
     get_estimation_detectors,
@@ -273,87 +274,117 @@ def render(config):
         return lat, lon, provider_used, perf_geocode
 
     # ---- Quartier & transports (Slide 4) ----
-    st.subheader("Quartier (Slide 4)")
-    quartier_texte = st.text_area("Texte d'intro du quartier (paragraphe)", st.session_state.get("q_txt", "Texte libre saisi par l'utilisateur."), key="q_txt")
-    perf_transports: dict[str, object] = {}
-    transport_mode = st.selectbox(
-        "Mode transports",
-        options=["FAST", "ENRICHED", "FULL"],
-        index=0,
-        help="FAST (Overpass uniquement, recommandé), ENRICHED (Overpass + Google si disponible), FULL (ajoute GTFS).",
+    st.subheader("Quartier & Transports (Slide 4)")
+    quartier_intro = st.text_area(
+        "Intro quartier (2-3 phrases)",
+        st.session_state.get("quartier_intro", "Texte libre saisi par l'utilisateur."),
+        key="quartier_intro",
     )
-    if st.button("Remplir Transports (auto)"):
-        lat, lon, provider_used, perf_geocode = _geocode_main_address(show_debug=geocode_debug)
-        if lat is not None:
-            start_tr = perf_counter()
-            with st.spinner("Chargement des transports…"):
-                try:
-                    radius_raw = st.session_state.get("radius_m", 1200)
+    st.session_state["q_txt"] = quartier_intro
+    col_q1, col_q2 = st.columns([1, 1])
+    with col_q1:
+        metro_txt = st.text_area(
+            "Transports métro (3-4 lignes)",
+            st.session_state.get("transports_metro_texte", ""),
+            key="transports_metro_texte",
+        )
+        bus_txt = st.text_area(
+            "Transports bus (3-4 lignes)",
+            st.session_state.get("transports_bus_texte", ""),
+            key="transports_bus_texte",
+        )
+    with col_q2:
+        taxi_txt = st.text_area(
+            "Transports taxi (1-2 lignes)",
+            st.session_state.get("transports_taxi_texte", ""),
+            key="transports_taxi_texte",
+        )
+        st.session_state["q_tx"] = taxi_txt
+
+    col_btn, col_hint = st.columns([1, 2])
+    with col_btn:
+        enrich_clicked = st.button("✨ Enrichir auto", disabled=not st.session_state.get("bien_addr", "").strip())
+    with col_hint:
+        st.caption("Saisissez l'adresse puis lancez l'enrichissement. Vous pouvez modifier manuellement si besoin.")
+
+    if enrich_clicked:
+        perf_transports: dict[str, object] = {}
+        perf_geocode: dict[str, object] = {}
+        addr_raw = st.session_state.get("bien_addr", "").strip()
+        with st.spinner("Enrichissement quartier & transports…"):
+            try:
+                payload = enrich_quartier_and_transports(addr_raw, report=run_report)
+                st.session_state.update(payload)
+                st.session_state["q_txt"] = payload.get("quartier_intro", quartier_intro)
+                st.session_state["q_tx"] = payload.get("transports_taxi_texte", taxi_txt)
+                quartier_intro = payload.get("quartier_intro", quartier_intro)
+                metro_txt = payload.get("transports_metro_texte", metro_txt)
+                bus_txt = payload.get("transports_bus_texte", bus_txt)
+                taxi_txt = payload.get("transports_taxi_texte", taxi_txt)
+                st.success("Enrichissement réalisé.")
+            except Exception as exc:
+                st.warning(str(exc))
+
+    with st.expander("Ancienne méthode (debug)", expanded=False):
+        perf_transports: dict[str, object] = {}
+        transport_mode = st.selectbox(
+            "Mode transports",
+            options=["FAST", "ENRICHED", "FULL"],
+            index=0,
+            help="FAST (Overpass uniquement, recommandé), ENRICHED (Overpass + Google si disponible), FULL (ajoute GTFS).",
+            key="legacy_transport_mode",
+        )
+        if st.button("Remplir Transports (auto)", key="legacy_transports_btn"):
+            lat, lon, provider_used, perf_geocode = _geocode_main_address(show_debug=geocode_debug)
+            if lat is not None:
+                start_tr = perf_counter()
+                with st.spinner("Chargement des transports…"):
                     try:
-                        radius = int(radius_raw)
-                    except (TypeError, ValueError):
-                        radius = 1200
-                    warning_count = len(run_report.provider_warnings)
-                    tr = get_transports(lat, lon, radius_m=radius, mode=transport_mode, report=run_report)
-                    st.session_state["q_tx"] = ", ".join(tr.get("taxis", []))
-                    st.session_state["metro_lines_auto"] = tr.get("metro_lines", [])
-                    st.session_state["bus_lines_auto"] = tr.get("bus_lines", [])
-                    st.session_state["transport_providers"] = tr.get("provider_used", {})
-                    new_warnings = run_report.provider_warnings[warning_count:]
-                    for warning in new_warnings:
-                        st.warning(warning)
-                    perf_transports = {
-                        "duration": perf_counter() - start_tr,
-                        "provider": tr.get("provider_used", {}),
-                        "cache": tr.get("cache_status", "miss"),
-                        "mode": transport_mode,
-                        "metro_count": len(tr.get("metro_lines", [])),
-                        "bus_count": len(tr.get("bus_lines", [])),
-                        "raw_metro": tr.get("raw_counts", {}).get("metro"),
-                        "raw_bus": tr.get("raw_counts", {}).get("bus"),
-                    }
-                    run_report.add_note(
-                        f"Transports: {perf_transports['duration']:.2f}s (cache {perf_transports['cache']}, mode {transport_mode})."
-                    )
-                except Exception as e:
-                    st.warning(f"Transports non chargés: {e}")
-                    st.session_state['transport_providers'] = {}
-        else:
-            st.session_state["q_tx"] = ""
-            st.session_state['metro_lines_auto'] = []
-            st.session_state['bus_lines_auto'] = []
-            st.session_state['transport_providers'] = {}
-        if geocode_debug:
-            with st.expander("Détails performance", expanded=True):
-                if perf_geocode:
-                    st.write(f"Géocodage: {perf_geocode.get('duration', 0):.2f}s via {perf_geocode.get('provider', '')} ({perf_geocode.get('cache', '')})")
-                if perf_transports:
-                    st.write(
-                        f"Transports: {perf_transports.get('duration', 0):.2f}s cache={perf_transports.get('cache', '')} "
-                        f"bruts métro/bus: {perf_transports.get('raw_metro', '-')}/{perf_transports.get('raw_bus', '-')} "
-                        f"affichés métro/bus: {perf_transports.get('metro_count', 0)}/{perf_transports.get('bus_count', 0)}"
-                    )
-    taxi_txt = st.session_state.get("q_tx", "")
-    metro_auto = st.session_state.get('metro_lines_auto', [])
-    bus_auto = st.session_state.get('bus_lines_auto', [])
-    metro_refs = _format_line_labels(metro_auto, "")
-    bus_refs = _format_line_labels(bus_auto, "")
-    st.write(f"Taxi : {taxi_txt or '—'}")
-    st.write(f"Stations proches : {metro_refs or '—'}")
-    st.write(f"Arrêts de bus proches : {bus_refs or '—'}")
-    providers = st.session_state.get('transport_providers')
-    if isinstance(providers, dict) and providers:
-        st.caption(
-            "source métro: {metro} | bus: {bus} | taxi: {taxi}".format(
-                metro=providers.get("metro", "-"),
-                bus=providers.get("bus", "-"),
-                taxi=providers.get("taxi", "-"),
-            )
-        )
-    if perf_transports:
-        st.caption(
-            f"Transports chargés: métro {perf_transports.get('metro_count', 0)}, bus {perf_transports.get('bus_count', 0)} | cache={perf_transports.get('cache', '')} | mode={perf_transports.get('mode', '')}"
-        )
+                        radius_raw = st.session_state.get("radius_m", 1200)
+                        try:
+                            radius = int(radius_raw)
+                        except (TypeError, ValueError):
+                            radius = 1200
+                        warning_count = len(run_report.provider_warnings)
+                        tr = get_transports(lat, lon, radius_m=radius, mode=transport_mode, report=run_report)
+                        st.session_state["q_tx"] = ", ".join(tr.get("taxis", []))
+                        st.session_state["metro_lines_auto"] = tr.get("metro_lines", [])
+                        st.session_state["bus_lines_auto"] = tr.get("bus_lines", [])
+                        st.session_state["transport_providers"] = tr.get("provider_used", {})
+                        new_warnings = run_report.provider_warnings[warning_count:]
+                        for warning in new_warnings:
+                            st.warning(warning)
+                        perf_transports = {
+                            "duration": perf_counter() - start_tr,
+                            "provider": tr.get("provider_used", {}),
+                            "cache": tr.get("cache_status", "miss"),
+                            "mode": transport_mode,
+                            "metro_count": len(tr.get("metro_lines", [])),
+                            "bus_count": len(tr.get("bus_lines", [])),
+                            "raw_metro": tr.get("raw_counts", {}).get("metro"),
+                            "raw_bus": tr.get("raw_counts", {}).get("bus"),
+                        }
+                        run_report.add_note(
+                            f"Transports: {perf_transports['duration']:.2f}s (cache {perf_transports['cache']}, mode {transport_mode})."
+                        )
+                    except Exception as e:
+                        st.warning(f"Transports non chargés: {e}")
+                        st.session_state['transport_providers'] = {}
+            else:
+                st.session_state["q_tx"] = ""
+                st.session_state['metro_lines_auto'] = []
+                st.session_state['bus_lines_auto'] = []
+                st.session_state['transport_providers'] = {}
+            if geocode_debug:
+                with st.expander("Détails performance", expanded=True):
+                    if perf_geocode:
+                        st.write(f"Géocodage: {perf_geocode.get('duration', 0):.2f}s via {perf_geocode.get('provider', '')} ({perf_geocode.get('cache', '')})")
+                    if perf_transports:
+                        st.write(
+                            f"Transports: {perf_transports.get('duration', 0):.2f}s cache={perf_transports.get('cache', '')} "
+                            f"bruts métro/bus: {perf_transports.get('raw_metro', '-')}/{perf_transports.get('raw_bus', '-')} "
+                            f"affichés métro/bus: {perf_transports.get('metro_count', 0)}/{perf_transports.get('bus_count', 0)}"
+                        )
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
@@ -680,6 +711,10 @@ def render(config):
         "[[TRANSPORT_TAXI_TEXTE]]": st.session_state.get('q_tx', ''),
         "[[TRANSPORT_METRO_TEXTE]]": metro_str,
         "[[TRANSPORT_BUS_TEXTE]]": bus_str,
+        "[[QUARTIER_INTRO]]": st.session_state.get("quartier_intro", ""),
+        "[[TRANSPORTS_METRO_TEXTE]]": st.session_state.get("transports_metro_texte", ""),
+        "[[TRANSPORTS_BUS_TEXTE]]": st.session_state.get("transports_bus_texte", ""),
+        "[[TRANSPORTS_TAXI_TEXTE]]": st.session_state.get("transports_taxi_texte", ""),
         "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
         "[[INCONTOURNABLE_2_NOM]]": st.session_state.get('i2', ''),
         "[[INCONTOURNABLE_3_NOM]]": st.session_state.get('i3', ''),
