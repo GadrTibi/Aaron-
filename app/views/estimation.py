@@ -1,4 +1,5 @@
 import os
+from collections.abc import MutableMapping
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Optional
@@ -24,6 +25,7 @@ from app.services import template_roots
 from app.services.transports_facade import get_transports
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.template_validation import validate_pptx_template
+from app.services.token_utils import apply_token_aliases, extract_pptx_tokens
 from services.image_uploads import save_uploaded_image
 from services.wiki_images import ImageCandidate, WikiImageService
 
@@ -36,6 +38,12 @@ from .utils import (
 
 
 DEFAULT_RADIUS_M = 300
+CRITICAL_TRANSPORT_TOKENS = (
+    "[[QUARTIER_INTRO]]",
+    "[[TRANSPORTS_METRO_TEXTE]]",
+    "[[TRANSPORTS_BUS_TEXTE]]",
+    "[[TRANSPORTS_TAXI_TEXTE]]",
+)
 
 
 def _restore_candidates(key: str) -> list[ImageCandidate]:
@@ -125,9 +133,26 @@ def _display_transport_caption(*debug_values: dict | None) -> None:
         caption_parts.append(f"mirror={mirror}")
     caption_parts.extend(parts)
     try:
-            st.caption("Transports: " + " | ".join(caption_parts))
+        st.caption("Transports: " + " | ".join(caption_parts))
     except Exception:
         pass
+
+
+def build_transport_mapping(state: MutableMapping[str, object]) -> dict[str, str]:
+    metro = state.get("metro_lines_auto") or []
+    bus = state.get("bus_lines_auto") or []
+    metro_refs_tokens = _collect_line_refs(metro, limit=3)
+    bus_refs_tokens = _collect_line_refs(bus, limit=3)
+    metro_str = ", ".join(metro_refs_tokens)
+    bus_str = ", ".join(bus_refs_tokens)
+    return {
+        "[[TRANSPORT_METRO_TEXTE]]": metro_str,
+        "[[TRANSPORT_BUS_TEXTE]]": bus_str,
+        "[[QUARTIER_INTRO]]": state.get("quartier_intro", ""),
+        "[[TRANSPORTS_METRO_TEXTE]]": state.get("transports_metro_texte", ""),
+        "[[TRANSPORTS_BUS_TEXTE]]": state.get("transports_bus_texte", ""),
+        "[[TRANSPORTS_TAXI_TEXTE]]": state.get("transports_taxi_texte", ""),
+    }
 
 
 def _compact_provider_status() -> str:
@@ -830,23 +855,12 @@ def render(config):
             st.caption("Graphique non généré pour le moment.")
 
     # Mapping Estimation
-    metro = st.session_state.get('metro_lines_auto') or []
-    bus = st.session_state.get('bus_lines_auto') or []
-    metro_refs_tokens = _collect_line_refs(metro, limit=3)
-    bus_refs_tokens = _collect_line_refs(bus, limit=3)
-    metro_str = ", ".join(metro_refs_tokens)
-    bus_str = ", ".join(bus_refs_tokens)
+    transport_mapping = build_transport_mapping(st.session_state)
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
         "[[QUARTIER_TEXTE]]": st.session_state.get("q_txt",""),
         "[[TRANSPORT_TAXI_TEXTE]]": st.session_state.get('q_tx', ''),
-        "[[TRANSPORT_METRO_TEXTE]]": metro_str,
-        "[[TRANSPORT_BUS_TEXTE]]": bus_str,
-        "[[QUARTIER_INTRO]]": st.session_state.get("quartier_intro", ""),
-        "[[TRANSPORTS_METRO_TEXTE]]": st.session_state.get("transports_metro_texte", ""),
-        "[[TRANSPORTS_BUS_TEXTE]]": st.session_state.get("transports_bus_texte", ""),
-        "[[TRANSPORTS_TAXI_TEXTE]]": st.session_state.get("transports_taxi_texte", ""),
         "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
         "[[INCONTOURNABLE_2_NOM]]": st.session_state.get('i2', ''),
         "[[INCONTOURNABLE_3_NOM]]": st.session_state.get('i3', ''),
@@ -877,6 +891,60 @@ def render(config):
         "[[PRIX_CIBLE]]": f"{PRIX_CIBLE:.0f} €",
         "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",
     }
+    mapping.update(transport_mapping)
+
+    est_tpl_path = selected_template.path if selected_template else None
+    tokens_in_template: set[str] = set()
+    template_token_error = None
+    if est_tpl_path:
+        if os.path.exists(est_tpl_path):
+            try:
+                tokens_in_template = extract_pptx_tokens(est_tpl_path)
+            except Exception as exc:
+                template_token_error = str(exc)
+                run_report.add_note(f"Extraction tokens template échouée: {exc}")
+        else:
+            template_token_error = "Template sélectionné introuvable sur le disque."
+    applied_aliases = apply_token_aliases(mapping, tokens_in_template)
+    if applied_aliases:
+        alias_labels = ", ".join(f"{alias} → {target}" for alias, target in applied_aliases.items())
+        run_report.add_note(f"Alias tokens appliqués: {alias_labels}")
+    mapping_keys_set = set(mapping.keys())
+    missing_in_mapping: list[str] = []
+    missing_in_template: list[str] = []
+    if tokens_in_template:
+        missing_in_mapping = sorted(tokens_in_template - mapping_keys_set)
+        missing_in_template = sorted(mapping_keys_set - tokens_in_template)
+        if missing_in_mapping:
+            run_report.add_note(f"Tokens du template sans mapping: {', '.join(missing_in_mapping)}")
+        if missing_in_template:
+            run_report.add_note(f"Tokens de mapping absents du template: {', '.join(missing_in_template)}")
+    template_debug_tokens = sorted(
+        token for token in tokens_in_template if any(tag in token for tag in ("TRANSPORT", "METRO", "BUS", "QUARTIER"))
+    )
+
+    with st.expander("Debug tokens template", expanded=False):
+        st.write(f"Template utilisé: {est_tpl_path or 'aucun'}")
+        if template_token_error:
+            st.warning(template_token_error)
+        elif tokens_in_template:
+            st.write("Tokens transports/quartier trouvés :", ", ".join(template_debug_tokens) or "aucun")
+        else:
+            st.caption("Aucun token analysé (template non sélectionné).")
+
+    with st.expander("Debug mapping injection", expanded=False):
+        for token in CRITICAL_TRANSPORT_TOKENS:
+            value = mapping.get(token, "")
+            value_str = "" if value is None else str(value)
+            st.write(f"{token}: {repr(value)} (len={len(value_str)})")
+            if not value_str.strip():
+                st.warning(f"Valeur vide pour {token}")
+                run_report.add_note(f"Valeur vide pour {token}")
+        if tokens_in_template:
+            st.write("Tokens du template sans mapping :", missing_in_mapping or "aucun")
+            st.write("Tokens du mapping absents du template :", missing_in_template or "aucun")
+        if applied_aliases:
+            st.caption("Alias appliqués : " + ", ".join(f"{alias} → {target}" for alias, target in applied_aliases.items()))
 
     # Images for VISITE_1/2 (from confirmed paths or uploaded files)
     image_by_shape = {}
@@ -909,7 +977,6 @@ def render(config):
     print("DBG image_by_shape (final):", image_by_shape)
 
     strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
-    est_tpl_path = selected_template.path if selected_template else None
     validation_result = None
     if est_tpl_path and os.path.exists(est_tpl_path):
         try:
