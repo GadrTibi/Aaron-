@@ -19,6 +19,7 @@ from app.services.pptx_requirements import get_book_detectors, get_book_requirem
 from app.services.pptx_fill import generate_book_pptx
 from app.services.template_catalog import TemplateItem, list_effective_templates
 from app.services.template_validation import validate_pptx_template
+from app.services.token_aliases import apply_token_aliases
 
 from .utils import (
     _sanitize_filename,
@@ -268,6 +269,15 @@ def render(config: dict) -> None:
         "[[MODE_CHAUFFAGE]]": st.session_state.get("bien_chauffage", ""),
     }
     mapping = {**base_mapping, **extra_mapping}
+
+    mapping_keys_before_aliases = set(mapping.keys())
+    mapping = apply_token_aliases(mapping)
+    applied_aliases = sorted(k for k in mapping if k not in mapping_keys_before_aliases)
+
+    with st.expander("Debug mapping injection", expanded=False):
+        alias_label = ", ".join(applied_aliases) if applied_aliases else "aucun"
+        st.caption(f"Aliases appliqués: {alias_label}")
+        st.json(mapping)
 
     image_by_shape: dict[str, str] = {}
 
