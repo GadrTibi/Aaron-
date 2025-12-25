@@ -11,7 +11,11 @@ from PIL import Image
 from app.services.pptx_images import inject_tagged_image
 from services.pptx_links import add_hyperlink_to_text
 from app.services.generation_report import GenerationReport
-from app.services.token_utils import extract_pptx_tokens_from_presentation, walk_pptx_shapes
+from app.services.token_utils import (
+    extract_pptx_tokens_from_presentation,
+    iter_shape_paragraphs,
+    walk_pptx_shapes,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -112,10 +116,9 @@ def _replace_token_in_paragraph(paragraph, token: str, value: str) -> bool:
 
 def replace_text_preserving_style(shapes, mapping: Dict[str, str]) -> None:
     for shape in walk_pptx_shapes(shapes):
-        if hasattr(shape, "text_frame") and shape.text_frame:
-            for para in shape.text_frame.paragraphs:
-                for token, value in mapping.items():
-                    _replace_token_in_paragraph(para, token, value)
+        for para in iter_shape_paragraphs(shape):
+            for token, value in mapping.items():
+                _replace_token_in_paragraph(para, token, value)
 
 def insert_image(slide, image_path: str, left=Inches(1), top=Inches(3), width=Inches(8)) -> None:
     slide.shapes.add_picture(image_path, left, top, width=width)
