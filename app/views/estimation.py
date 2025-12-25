@@ -6,9 +6,8 @@ import streamlit as st
 from streamlit.errors import StreamlitAPIException
 
 from app.services.generation_report import GenerationReport
-from app.services.geocode_cache import get_cached_geocode, normalize_address, set_cached_geocode
-from app.services.geocode_flow import should_use_session_cache
-from app.services.geocoding_fallback import geocode_address_fallback
+from app.services.geo_helpers import ensure_geocoded
+from app.services.geocode_cache import normalize_address
 from app.services.map_image import build_static_map
 from app.services.plots import build_estimation_histo
 from app.services.poi_facade import POIResult, get_pois
@@ -205,78 +204,84 @@ def render(config):
             st.session_state["geocode_provider"] = ""
             return None, None, "", perf_geocode
 
-        session_lat = st.session_state.get("geo_lat")
-        session_lon = st.session_state.get("geo_lon")
-        session_addr = st.session_state.get("geocode_address_norm", "")
-
-        if should_use_session_cache(addr, session_addr, session_lat, session_lon):
-            st.info("Utilisation coordonnées en cache session")
-            provider_used = st.session_state.get("geocode_provider", "Nominatim")
-            perf_geocode = {"duration": 0.0, "provider": provider_used, "cache": "session"}
-            run_report.add_note(f"Géocodage via cache session ({provider_used})")
-            return session_lat, session_lon, provider_used, perf_geocode
-
-        cached = get_cached_geocode(addr)
-        if cached:
-            lat, lon, provider_used = cached
-            st.session_state["geo_lat"] = lat
-            st.session_state["geo_lon"] = lon
-            st.session_state["geocode_provider"] = provider_used or "Nominatim"
-            perf_geocode = {"duration": 0.0, "provider": provider_used or "Nominatim", "cache": "disk_hit"}
-            st.info("Coordonnées récupérées depuis le cache disque.")
-            run_report.add_note(f"Géocodage cache disque ({provider_used or 'Nominatim'}).")
-            return lat, lon, provider_used, perf_geocode
+        cache_hit = (
+            st.session_state.get("geo_lat") is not None
+            and st.session_state.get("geo_lon") is not None
+            and st.session_state.get("geocoded_address") == normalized_addr
+        )
 
         last_warning_before = len(run_report.provider_warnings)
         start = perf_counter()
-        with st.spinner("Géocodage…"):
-            try:
-                lat, lon, provider_used = geocode_address_fallback(addr, report=run_report)
-            except ValueError as exc:
-                st.error(str(exc))
-                st.session_state["geo_lat"] = None
-                st.session_state["geo_lon"] = None
-                st.session_state["geocode_provider"] = ""
-                return None, None, "", perf_geocode
-            except Exception as exc:
-                st.error(f"Géocodage impossible: {exc}")
-                st.session_state["geo_lat"] = None
-                st.session_state["geo_lon"] = None
-                st.session_state["geocode_provider"] = ""
-                return None, None, "", perf_geocode
+        try:
+            if cache_hit:
+                lat, lon, provider_used = ensure_geocoded(addr, report=run_report)
+            else:
+                with st.spinner("Géocodage…"):
+                    lat, lon, provider_used = ensure_geocoded(addr, report=run_report)
+        except ValueError as exc:
+            st.error(str(exc))
+            st.session_state["geo_lat"] = None
+            st.session_state["geo_lon"] = None
+            st.session_state["geocode_provider"] = ""
+            return None, None, "", perf_geocode
+        except Exception as exc:
+            st.error(f"Géocodage impossible: {exc}")
+            st.session_state["geo_lat"] = None
+            st.session_state["geo_lon"] = None
+            st.session_state["geocode_provider"] = ""
+            return None, None, "", perf_geocode
         duration = perf_counter() - start
 
         last_warning = run_report.provider_warnings[-1] if run_report.provider_warnings else None
+        provider_label = st.session_state.get("geocode_provider") or provider_used or "Nominatim"
         if lat is None or lon is None:
             if last_warning and len(run_report.provider_warnings) > last_warning_before:
                 st.error(f"Géocodage échoué: {last_warning}")
             else:
                 st.error("Géocodage échoué: adresse introuvable.")
         else:
-            provider_label = provider_used or "Nominatim"
             st.success(f"Adresse géocodée via {provider_label}: {lat}, {lon}")
-            set_cached_geocode(addr, lat, lon, provider_label)
-            if provider_used and provider_used != "Nominatim":
+            if provider_used == "session_cache":
+                st.info("Utilisation des coordonnées en cache session.")
+            elif provider_used and provider_used != "Nominatim":
                 st.warning(f"Fallback géocodage: {provider_used} utilisé.")
-        st.session_state["geo_lat"] = lat
-        st.session_state["geo_lon"] = lon
-        st.session_state["geocode_provider"] = (provider_used or "Nominatim") if (lat is not None and lon is not None) else ""
         perf_geocode = {
             "duration": duration,
-            "provider": provider_used or "Nominatim",
-            "cache": "network" if lat is not None else "error",
+            "provider": provider_label,
+            "cache": "session" if provider_used == "session_cache" else ("network" if lat is not None else "error"),
         }
-        run_report.add_note(f"Géocodage: {duration:.2f}s via {provider_used or 'Nominatim'} ({perf_geocode['cache']}).")
+        run_report.add_note(f"Géocodage: {duration:.2f}s via {provider_label} ({perf_geocode['cache']}).")
 
         if show_debug:
             st.info("Debug géocodage activé :")
             st.write(f"Adresse envoyée: {addr}")
-            st.write(f"Provider utilisé/principal: {provider_used or 'Nominatim'}")
+            st.write(f"Provider utilisé/principal: {provider_label}")
             st.write(f"Durée: {duration:.2f}s")
             st.write(f"Cache: {perf_geocode['cache']}")
             if run_report.provider_warnings:
                 st.warning(" / ".join(run_report.provider_warnings[-3:]))
-        return lat, lon, provider_used, perf_geocode
+        return lat, lon, provider_label, perf_geocode
+
+    def _auto_geocode_or_stop(action_label: str, *, stop_on_error: bool = True) -> tuple[float | None, float | None, str]:
+        addr_raw = (st.session_state.get("bien_addr", "") or "").strip()
+        normalized_addr = normalize_address(addr_raw)
+        needs_spinner = (
+            st.session_state.get("geo_lat") is None
+            or st.session_state.get("geo_lon") is None
+            or st.session_state.get("geocoded_address") != normalized_addr
+        )
+        try:
+            if needs_spinner:
+                with st.spinner("Géocodage automatique…"):
+                    return ensure_geocoded(addr_raw, report=run_report)
+            return ensure_geocoded(addr_raw, report=run_report)
+        except ValueError as exc:
+            st.error(str(exc))
+        except Exception as exc:
+            st.error(f"{action_label} impossible: {exc}")
+        if stop_on_error:
+            st.stop()
+        return None, None, ""
 
     # ---- Quartier & transports (Slide 4) ----
     st.subheader("Quartier & Transports (Slide 4)")
@@ -315,6 +320,10 @@ def render(config):
         perf_geocode: dict[str, object] = {}
         addr_raw = st.session_state.get("bien_addr", "").strip()
         with st.spinner("Enrichissement quartier & transports…"):
+            try:
+                _auto_geocode_or_stop("Géocodage automatique (enrichissement)", stop_on_error=False)
+            except Exception:
+                pass
             try:
                 payload = enrich_quartier_and_transports(addr_raw, report=run_report)
                 st.session_state["_quartier_pending"] = {
@@ -422,8 +431,14 @@ def render(config):
         radius_m = int(radius_raw)
     except (TypeError, ValueError):
         radius_m = DEFAULT_RADIUS_M
-    lat_raw = st.session_state.get("geo_lat")
-    lon_raw = st.session_state.get("geo_lon")
+
+    address_raw = (st.session_state.get("bien_addr", "") or "").strip()
+    normalized_address = normalize_address(address_raw)
+    if st.session_state.get("_poi_address") and st.session_state.get("_poi_address") != normalized_address:
+        for key in ("_poi_results", "_poi_provider", "_poi_radius"):
+            st.session_state.pop(key, None)
+    if st.session_state.get("_auto_geo_attempted_addr") and st.session_state.get("_auto_geo_attempted_addr") != normalized_address:
+        st.session_state.pop("_auto_geo_attempted_addr")
 
     def _to_float(value) -> float | None:
         try:
@@ -431,40 +446,87 @@ def render(config):
         except (TypeError, ValueError):
             return None
 
-    lat_val = _to_float(lat_raw)
-    lon_val = _to_float(lon_raw)
+    lat_val = _to_float(st.session_state.get("geo_lat"))
+    lon_val = _to_float(st.session_state.get("geo_lon"))
+
+    if (lat_val is None or lon_val is None) and normalized_address and st.session_state.get("_auto_geo_attempted_addr") != normalized_address:
+        st.info("Coordonnées manquantes : géocodage automatique en cours…")
+        lat_val, lon_val, _ = _auto_geocode_or_stop("Géocodage automatique", stop_on_error=False)
+        st.session_state["_auto_geo_attempted_addr"] = normalized_address
+        lat_val = _to_float(st.session_state.get("geo_lat"))
+        lon_val = _to_float(st.session_state.get("geo_lon"))
+
+    provider_in_state = st.session_state.get("geocode_provider") or ""
+    coord_caption = "Non géocodé"
+    if lat_val is not None and lon_val is not None:
+        provider_label = provider_in_state or "N/A"
+        coord_caption = f"Coordonnées: OK ({lat_val:.4f}, {lon_val:.4f}) via {provider_label}"
+        if st.session_state.get("geocoded_address") and st.session_state.get("geocoded_address") != normalized_address:
+            coord_caption = f"Coordonnées présentes (adresse précédente: {st.session_state.get('geocoded_address')})."
 
     incontournables_items: list[POIResult] = []
     spots_items: list[POIResult] = []
     visits_items: list[POIResult] = []
-    poi_provider = ""
+    poi_provider = st.session_state.get("_poi_provider", "") if st.session_state.get("_poi_address") == normalized_address else ""
 
-    if lat_val is None or lon_val is None:
-        st.info("Adresse non géocodée. Lancez la recherche d'adresse avant de charger les lieux.")
-    else:
+    poi_btn_col, poi_status_col = st.columns([1, 2])
+    with poi_btn_col:
+        load_poi_clicked = st.button("Charger les lieux automatiquement")
+    with poi_status_col:
+        st.caption(coord_caption)
+        if st.button("🔎 Géocoder maintenant", key="force_geocode_now"):
+            manual_lat, manual_lon, manual_provider = _auto_geocode_or_stop("Géocodage automatique", stop_on_error=False)
+            if manual_lat is not None and manual_lon is not None:
+                lat_val, lon_val = manual_lat, manual_lon
+                st.success(f"Coordonnées mises à jour (via {manual_provider or provider_in_state or 'géo'}).")
+
+    def _resolve_poi_provider(results: dict[str, list[POIResult]]) -> str:
+        for bucket in ("incontournables", "spots", "visits"):
+            items = results.get(bucket) or []
+            if items:
+                return items[0].provider
+        return ""
+
+    cached_poi = st.session_state.get("_poi_results") if st.session_state.get("_poi_address") == normalized_address else None
+    cached_radius = st.session_state.get("_poi_radius")
+    poi_results = cached_poi if cached_poi and cached_radius == radius_m else None
+    poi_attempted = load_poi_clicked or poi_results is not None
+
+    if load_poi_clicked:
+        lat_val, lon_val, provider_used = _auto_geocode_or_stop("Chargement des lieux")
+        if lat_val is None or lon_val is None:
+            st.error("Coordonnées introuvables : géocodage automatique requis.")
+            st.stop()
         try:
-            poi_results = get_pois(
-                lat_val,
-                lon_val,
-                radius_m,
-                categories=("incontournables", "spots", "visits"),
-                report=run_report,
-            )
-            incontournables_items = poi_results.get("incontournables", [])
-            spots_items = poi_results.get("spots", [])
-            visits_items = poi_results.get("visits", [])
-            for bucket in (incontournables_items, spots_items, visits_items):
-                if bucket:
-                    poi_provider = bucket[0].provider
-                    break
+            with st.spinner("Chargement des lieux…"):
+                poi_results = get_pois(
+                    lat_val,
+                    lon_val,
+                    radius_m,
+                    categories=("incontournables", "spots", "visits"),
+                    report=run_report,
+                )
         except Exception as exc:
             run_report.add_provider_warning(f"POI indisponibles: {exc}", blocking=True)
             st.error(f"Impossible de charger les lieux automatiquement: {exc}")
+        else:
+            st.session_state["_poi_results"] = poi_results
+            st.session_state["_poi_provider"] = _resolve_poi_provider(poi_results)
+            st.session_state["_poi_address"] = normalized_address
+            st.session_state["_poi_radius"] = radius_m
+            poi_provider = st.session_state.get("_poi_provider", "")
+
+    if poi_results:
+        incontournables_items = poi_results.get("incontournables", [])
+        spots_items = poi_results.get("spots", [])
+        visits_items = poi_results.get("visits", [])
+        if not poi_provider:
+            poi_provider = _resolve_poi_provider(poi_results)
 
     if run_report.provider_warnings:
         st.warning(" / ".join(run_report.provider_warnings[-2:]))
     st.caption(f"source: {poi_provider or 'Auto (fallback)'}")
-    if lat_val is not None and lon_val is not None and not (incontournables_items or spots_items or visits_items):
+    if poi_attempted and lat_val is not None and lon_val is not None and not (incontournables_items or spots_items or visits_items):
         st.error("Aucun fournisseur POI disponible : saisissez manuellement les lieux clés.")
 
     def _select_places(label: str, items: list[POIResult], keys: Iterable[str]) -> list[str]:
@@ -780,15 +842,18 @@ def render(config):
     if v2_final:
         image_by_shape["VISITE_2_MASK"] = v2_final
 
+    def _attach_map(target: dict[str, str]) -> None:
+        lat = st.session_state.get("geo_lat")
+        lon = st.session_state.get("geo_lon")
+        if lat and lon:
+            try:
+                map_path = build_static_map(lat, lon, pixel_radius=60, size=(900, 900))
+                target["MAP_MASK"] = map_path
+            except Exception as e:
+                st.warning(f"Carte non générée: {e}")
+
     # === MAP ===
-    lat = st.session_state.get("geo_lat")
-    lon = st.session_state.get("geo_lon")
-    if lat and lon:
-        try:
-            map_path = build_static_map(lat, lon, pixel_radius=60, size=(900, 900))
-            image_by_shape["MAP_MASK"] = map_path
-        except Exception as e:
-            st.warning(f"Carte non générée: {e}")
+    _attach_map(image_by_shape)
 
     print("DBG image_by_shape (final):", image_by_shape)
 
@@ -825,6 +890,8 @@ def render(config):
         except Exception as exc:
             st.error(f"Graphique estimation indisponible: {exc}")
             st.stop()
+        _auto_geocode_or_stop("Géocodage automatique (génération)")
+        _attach_map(image_by_shape)
         pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
         generation_report = generate_estimation_pptx(
             est_tpl_path,
