@@ -99,6 +99,7 @@ def resolve_api_key(
 def _provider_definitions() -> list[ProviderInfo]:
     return [
         ProviderInfo("Google Places", ["GOOGLE_MAPS_API_KEY"]),
+        ProviderInfo("OpenAI", ["OPENAI_API_KEY"]),
         ProviderInfo("Geoapify", ["GEOAPIFY_API_KEY"]),
         ProviderInfo("OpenTripMap", ["OPENTRIPMAP_API_KEY"]),
         ProviderInfo("Unsplash", ["UNSPLASH_ACCESS_KEY"]),

@@ -9,7 +9,7 @@ try:
 except Exception:  # pragma: no cover - tomllib indisponible
     tomllib = None  # type: ignore[assignment]
 
-from app.services.provider_status import get_provider_status
+from app.services.provider_status import get_provider_status, resolve_api_key
 
 
 # Ecriture TOML simple sans dépendance externe
@@ -39,6 +39,14 @@ def _secrets_search_paths() -> list[Path]:
         Path.cwd() / ".streamlit" / "secrets.toml",
         Path.cwd() / "app" / ".streamlit" / "secrets.toml",
     ]
+
+
+def _mask_secret(value: str) -> str:
+    if not value:
+        return "ABSENTE"
+    if len(value) <= 8:
+        return f"…{value[-4:]}"
+    return f"{value[:3]}…{value[-4:]}"
 
 
 def _read_toml_file(path: Path) -> Dict[str, Any]:
@@ -72,8 +80,24 @@ def _write_toml_file(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         path.write_text(_dump_toml(payload), encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
     except OSError:
         pass
+
+
+def _local_secret_path() -> Path:
+    return Path.home() / ".mfy_local_app" / "secrets.toml"
+
+
+def _has_local_secret(name: str) -> bool:
+    try:
+        payload = _read_toml_file(_local_secret_path())
+    except Exception:
+        return False
+    return bool(payload.get(name))
 
 
 def read_local_secret(name: str, default: str = "") -> str:
@@ -114,7 +138,7 @@ def write_local_secret(name: str, value: str) -> None:
     if not name:
         return
 
-    target = Path.home() / ".mfy_local_app" / "secrets.toml"
+    target = _local_secret_path()
     try:
         payload = _read_toml_file(target) if target.exists() else {}
     except Exception:
@@ -123,27 +147,65 @@ def write_local_secret(name: str, value: str) -> None:
     _write_toml_file(target, payload)
 
 
+def _delete_local_secret(name: str) -> None:
+    target = _local_secret_path()
+    try:
+        payload = _read_toml_file(target) if target.exists() else {}
+    except Exception:
+        payload = {}
+    if name in payload:
+        payload.pop(name, None)
+        _write_toml_file(target, payload)
+
+
+def _render_key_block(st, *, title: str, key_name: str, help_text: str) -> None:
+    detected_value, key_source = resolve_api_key(key_name)
+    masked = _mask_secret(detected_value)
+    if masked == "ABSENTE":
+        st.caption(f"Clé {title} absente (source: missing)")
+    else:
+        st.caption(f"Clé {title} détectée: {masked} (source: {key_source})")
+
+    new_val = st.text_input(
+        key_name,
+        value="",
+        type="password",
+        help=help_text,
+        key=f"input_{key_name.lower()}",
+    )
+    col_save, col_clear = st.columns([2, 1])
+    with col_save:
+        if st.button("Enregistrer", key=f"save_{key_name.lower()}"):
+            if new_val.strip():
+                write_local_secret(key_name, new_val.strip())
+                st.success("Clé enregistrée localement (~/.mfy_local_app/secrets.toml). Relancez la page.")
+            else:
+                st.warning("Aucune valeur saisie.")
+    with col_clear:
+        if _has_local_secret(key_name):
+            if st.button("Effacer la clé locale", key=f"clear_{key_name.lower()}"):
+                _delete_local_secret(key_name)
+                st.info("Clé locale effacée.")
+
+
 # --- UI RENDER (ajuste la section qui lit/affiche la clé) ---
 def render(config):  # type: ignore[override]
     import streamlit as st
 
     st.subheader("Clés API")
-    existing_key = read_local_secret("GOOGLE_MAPS_API_KEY", "")
-    masked = ("…" + existing_key[-4:]) if existing_key else "ABSENTE"
-    st.caption(f"Clé Google détectée: {masked}")
-
-    new_val = st.text_input(
-        "GOOGLE_MAPS_API_KEY",
-        value="",
-        type="password",
-        help="Collez votre clé Google Maps Platform.",
+    _render_key_block(
+        st,
+        title="Google Maps Platform",
+        key_name="GOOGLE_MAPS_API_KEY",
+        help_text="Collez votre clé Google Maps Platform.",
     )
-    if st.button("Enregistrer"):
-        if new_val.strip():
-            write_local_secret("GOOGLE_MAPS_API_KEY", new_val.strip())
-            st.success("Clé enregistrée localement (~/.mfy_local_app/secrets.toml). Relancez la page.")
-        else:
-            st.warning("Aucune valeur saisie.")
+    st.markdown("---")
+    _render_key_block(
+        st,
+        title="OpenAI",
+        key_name="OPENAI_API_KEY",
+        help_text="Clé OpenAI utilisée pour l'enrichissement LLM.",
+    )
 
     st.markdown("---")
     st.subheader("Statut des fournisseurs")

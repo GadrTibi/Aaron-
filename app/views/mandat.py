@@ -1,13 +1,16 @@
 import os
 from datetime import date
+from pathlib import Path
 
 import streamlit as st
 
 from app.services.generation_report import GenerationReport
 from app.services.mandat_tokens import build_mandat_mapping
 from app.services.docx_fill import generate_docx_from_template
+from app.services.template_catalog import TemplateItem, list_effective_templates
+from app.services import template_roots
 from app.services.template_validation import validate_docx_template
-from .utils import _sanitize_filename, list_templates, render_generation_report, render_template_validation
+from .utils import _sanitize_filename, render_generation_report, render_template_validation
 
 
 def render(config):
@@ -18,38 +21,83 @@ def render(config):
 
     # ---- Templates Mandat (DOCX) ----
     st.subheader("Templates Mandat (DOCX)")
-    st.caption(f"Dossier : {MANDAT_TPL_DIR}")
-    man_list = list_templates(MANDAT_TPL_DIR, "docx")
-    uploaded_docx = st.file_uploader(
-        "Ajouter des templates DOCX", type=["docx"], accept_multiple_files=True, key="up_man"
-    )
-    if uploaded_docx:
-        saved = 0
-        for up in uploaded_docx:
-            safe_name = _sanitize_filename(up.name, "docx")
-            dst = os.path.join(MANDAT_TPL_DIR, safe_name)
-            if os.path.exists(dst):
-                base, ext = os.path.splitext(safe_name)
-                i = 2
-                while os.path.exists(os.path.join(MANDAT_TPL_DIR, f"{base} ({i}){ext}")):
-                    i += 1
-                dst = os.path.join(MANDAT_TPL_DIR, f"{base} ({i}){ext}")
-            with open(dst, "wb") as f:
-                f.write(up.getbuffer())
-            saved += 1
-        st.success(f"{saved} template(s) ajouté(s).")
-        man_list = list_templates(MANDAT_TPL_DIR, "docx")
-    legacy_man = os.path.join(TPL_DIR, "mandat_template.docx")
-    has_legacy_man = os.path.exists(legacy_man)
-    options = (["mandat_template.docx (héritage)"] if has_legacy_man else []) + man_list
-    chosen_man = st.selectbox("Choisir le template Mandat", options=options if options else ["(aucun)"])
+    st.caption(f"Templates serveur (Git) : {template_roots.MANDAT_TPL_DIR}")
 
-    def resolve_mandat_template_path(label: str):
-        if not label or label == "(aucun)":
-            return None
-        if label == "mandat_template.docx (héritage)":
-            return legacy_man
-        return os.path.join(MANDAT_TPL_DIR, label)
+    def _select_template(kind: str, select_key: str) -> TemplateItem | None:
+        effective = list_effective_templates(kind)
+        repo_items = [tpl for tpl in effective if tpl.source == "repo"]
+        legacy_items = [tpl for tpl in effective if tpl.source != "repo"]
+        selected: TemplateItem | None = None
+
+        if repo_items:
+            label = st.selectbox(
+                "Templates serveur (Git)",
+                options=[tpl.label for tpl in repo_items],
+                key=f"{select_key}_repo",
+            )
+            selected = next((tpl for tpl in repo_items if tpl.label == label), None)
+        else:
+            st.warning("Aucun template trouvé dans templates/mandat. Ajoutez-en via Git.")
+            if legacy_items:
+                label = st.selectbox(
+                    "Templates hérités (MFY_* ou dossiers locaux)",
+                    options=[tpl.label for tpl in legacy_items],
+                    key=f"{select_key}_legacy",
+                )
+                selected = next((tpl for tpl in legacy_items if tpl.label == label), None)
+        return selected
+
+    selected_template = _select_template("mandat", select_key="mandat_tpl")
+
+    with st.expander("Template uploadé (non persistant)", expanded=False):
+        st.caption("Les fichiers déposés ici ne sont pas persistants sur Streamlit Community Cloud.")
+        uploaded_docx = st.file_uploader(
+            "Ajouter des templates DOCX",
+            type=["docx"],
+            accept_multiple_files=True,
+            key="up_man",
+        )
+        man_upload_dir = Path(MANDAT_TPL_DIR)
+        if uploaded_docx:
+            man_upload_dir.mkdir(parents=True, exist_ok=True)
+            saved = 0
+            for up in uploaded_docx:
+                safe_name = _sanitize_filename(up.name, "docx")
+                dst = man_upload_dir / safe_name
+                if dst.exists():
+                    base = dst.stem
+                    ext = dst.suffix
+                    i = 2
+                    candidate = man_upload_dir / f"{base} ({i}){ext}"
+                    while candidate.exists():
+                        i += 1
+                        candidate = man_upload_dir / f"{base} ({i}){ext}"
+                    dst = candidate
+                with open(dst, "wb") as f:
+                    f.write(up.getbuffer())
+                saved += 1
+            st.success(f"{saved} template(s) ajouté(s).")
+            st.toast("Rafraîchissez la sélection ci-dessus pour utiliser les templates ajoutés.")
+
+        upload_items: list[TemplateItem] = []
+        if man_upload_dir.resolve() != template_roots.MANDAT_TPL_DIR.resolve():
+            upload_items = [
+                TemplateItem(label=p.name, source="uploaded", path=p)
+                for p in man_upload_dir.iterdir()
+                if p.is_file() and p.suffix.lower() == ".docx"
+            ]
+        if upload_items:
+            use_uploaded = st.checkbox(
+                "Utiliser un template uploadé (non persistant)",
+                key="use_man_uploaded",
+            )
+            if use_uploaded:
+                label = st.selectbox(
+                    "Templates uploadés",
+                    options=[tpl.label for tpl in upload_items],
+                    key="mandat_uploaded_select",
+                )
+                selected_template = next((tpl for tpl in upload_items if tpl.label == label), selected_template)
 
     # ---- UI Mandat sans redondance ----
     st.subheader("Mandat (DOCX)")
@@ -113,7 +161,7 @@ def render(config):
 
     mapping = build_mandat_mapping(st.session_state)
     strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
-    tpl_path = resolve_mandat_template_path(chosen_man)
+    tpl_path = selected_template.path if selected_template else None
     validation_result = None
     if tpl_path and os.path.exists(tpl_path):
         try:
@@ -124,7 +172,7 @@ def render(config):
 
     disable_generate = strict_mode and validation_result is not None and validation_result.severity == "KO"
     if st.button("Générer le DOCX (Mandat)", disabled=disable_generate):
-        tpl_path = resolve_mandat_template_path(chosen_man)
+        tpl_path = selected_template.path if selected_template else None
         if not tpl_path or not os.path.exists(tpl_path):
             st.error(
                 "Aucun template DOCX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus."

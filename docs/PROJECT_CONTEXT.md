@@ -14,7 +14,7 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
    ```bash
    streamlit run app/main.py --server.headless=true --global.developmentMode=false
    ```
-   - Utilise les répertoires par défaut dans le repo (`app/templates/*` si présents, `output/`, `_images_cache/`). Surcharges possibles via `MFY_TPL_DIR`, `MFY_EST_TPL_DIR`, `MFY_BOOK_TPL_DIR`, `MFY_MAND_TPL_DIR`, `MFY_OUT_DIR`, `MFY_IMG_CACHE_DIR`. 【app/main.py†L12-L36】
+   - Utilise les répertoires par défaut dans le repo (`templates/<type>` versionnés, `output/`, `_images_cache/`). Surcharges possibles via `MFY_TPL_DIR`, `MFY_EST_TPL_DIR`, `MFY_BOOK_TPL_DIR`, `MFY_MAND_TPL_DIR`, `MFY_OUT_DIR`, `MFY_IMG_CACHE_DIR`. 【app/main.py†L12-L36】【app/services/template_roots.py†L1-L15】
 4. **Arrêt rapide** : bouton “Quitter l’application” (sidebar) ou `Ctrl+C` dans le terminal.
 
 ## Pages Streamlit
@@ -25,14 +25,15 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
 
 ## Flux de bout en bout
 - **Estimation → PPTX**
-  1. L’utilisateur saisit adresse, caractéristiques, prix nuitée et rayon (UI).
-  2. Géocodage Nominatim (`geocode_address`) stocke lat/lon. 【app/services/geocode.py†L20-L51】
-  3. Transports : `TransportService` agrège GTFS/OSM/Google pour taxis/métro/bus, stocke dans `session_state`. 【services/transports_v3.py†L1-L215】
-  4. POI : `GooglePlacesService` charge incontournables/spots/visites (cache 120 s). 【app/views/estimation.py†L15-L61】
-  5. Images visites : `WikiImageService.candidates` + téléchargement ou upload utilisateur. 【app/views/estimation.py†L122-L230】
-  6. Carte statique : `build_static_map` (OSM staticmap). 【app/services/map_image.py†L1-L26】
-  7. Graphique prix : `build_estimation_histo` génère `out/plots/estimation_histo.png`. 【app/services/plots.py†L49-L117】
-  8. Mapping tokens + images → `generate_estimation_pptx` (remplacement texte + images/mask + histogramme) écrit dans `OUT_DIR/Estimation - <adresse>.pptx` et renvoie un `GenerationReport` affiché dans l’UI. 【app/services/pptx_fill.py†L90-L210】【app/views/estimation.py†L246-L320】
+ 1. L’utilisateur saisit adresse, caractéristiques, prix nuitée et rayon (UI).
+ 2. Géocodage Nominatim (`geocode_address`) stocke lat/lon. 【app/services/geocode.py†L20-L51】
+ 3. Quartier & transports : enrichissement LLM (JSON strict) produit intro quartier + textes métro/bus/taxi, stockés en session et utilisables en manuel si l’appel échoue. 【app/services/quartier_enricher.py†L1-L74】【app/views/estimation.py†L254-L340】
+ 4. Transports legacy (debug) : pipeline GTFS/OSM/Google conservé sous expander. 【app/views/estimation.py†L312-L340】
+ 5. POI : `GooglePlacesService` charge incontournables/spots/visites (cache 120 s). 【app/views/estimation.py†L343-L420】
+ 6. Images visites : `WikiImageService.candidates` + téléchargement ou upload utilisateur. 【app/views/estimation.py†L122-L230】
+ 7. Carte statique : `build_static_map` (OSM staticmap). 【app/services/map_image.py†L1-L26】
+ 8. Graphique prix : `build_estimation_histo` génère `out/plots/estimation_histo.png`. 【app/services/plots.py†L49-L117】
+ 9. Mapping tokens + images → `generate_estimation_pptx` (remplacement texte + images/mask + histogramme) écrit dans `OUT_DIR/Estimation - <adresse>.pptx` et renvoie un `GenerationReport` affiché dans l’UI. 【app/services/pptx_fill.py†L90-L210】【app/views/estimation.py†L246-L320】
 - **Mandat → DOCX**
   1. L’utilisateur sélectionne un modèle DOCX.
   2. `build_mandat_mapping` assemble les données générales + champs spécifiques mandat (dates, destination, commission, pièces, animaux…). 【app/services/mandat_tokens.py†L1-L107】
@@ -43,9 +44,20 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
   3. Carte statique (`build_static_map`) et images accès injectées dans `generate_book_pptx`, qui retourne un `GenerationReport` affiché dans l’UI (tokens/shapes/images manquants). PDF alternatif généré par `build_book_pdf` (sections vides par défaut). 【app/services/pptx_fill.py†L172-L260】【app/services/book_pdf.py†L1-L33】
 
 ## Templates attendus
-- PPTX Estimation : tous les fichiers dans `EST_TPL_DIR` (upload possible via UI) ou héritage `estimation_template.pptx` dans `TPL_DIR`. 【app/views/estimation.py†L96-L121】
-- DOCX Mandat : modèles dans `MANDAT_TPL_DIR` ou `mandat_template.docx` dans `TPL_DIR`. 【app/views/mandat.py†L17-L47】
-- PPTX Book : modèles dans `BOOK_TPL_DIR` (UI upload). Aucun héritage. 【app/views/book.py†L22-L52】
+- PPTX Estimation : fichiers dans `templates/estimation` versionnés (prioritaires) ou, s’ils sont absents, dossiers hérités `MFY_EST_TPL_DIR` / `MFY_TPL_DIR`. Upload ponctuel possible (non persistant en cloud). 【app/services/template_catalog.py†L49-L88】【app/views/estimation.py†L96-L163】
+- DOCX Mandat : modèles Git dans `templates/mandat` puis fallback éventuel vers `MFY_MAND_TPL_DIR`/`MFY_TPL_DIR`. Upload ponctuel autorisé. 【app/services/template_catalog.py†L49-L88】【app/views/mandat.py†L17-L78】
+- PPTX Book : modèles Git dans `templates/book` ou fallback hérité. Upload ponctuel autorisé. 【app/services/template_catalog.py†L49-L88】【app/views/book.py†L79-L157】
+- Structure versionnée recommandée (persistante sur Streamlit Cloud) :
+  ```
+  templates/
+    estimation/   # PPTX
+    mandat/       # DOCX
+    book/         # PPTX
+  ```
+  Des fichiers `.gitkeep` maintiennent l’arborescence si aucun template n’est encore ajouté.
+- Recommandations de nommage : suffixer par le type (`estimation_classique.pptx`, `mandat_meuble.docx`, `book_fr.pptx`) pour apparaître triés alphabétiquement dans l’UI.
+- Tokens essentiels à prévoir dans les templates Estimation : `[[QUARTIER_INTRO]]`, `[[TRANSPORTS_METRO_TEXTE]]`, `[[TRANSPORTS_BUS_TEXTE]]`, `[[TRANSPORTS_TAXI_TEXTE]]`, `[[TRANSPORT_METRO_TEXTE]]`, `[[TRANSPORT_BUS_TEXTE]]`, `[[QUARTIER_TEXTE]]` pour injecter les textes quartier/transports générés. 【app/views/estimation.py†L835-L863】
+- Uploads via l’UI : possibles mais non persistants en cloud (disque éphémère). Les templates Git restent la source de vérité en production Streamlit.
 - Validation pré-génération : chaque page affiche une section « Validation du template » listant tokens inconnus et shapes manquantes ; en mode strict, un statut KO désactive la génération. 【app/views/estimation.py†L337-L375】【app/views/mandat.py†L82-L126】【app/views/book.py†L137-L184】
 
 ## Gestion des chemins

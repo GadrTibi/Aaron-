@@ -1,6 +1,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 # Ensure the repository root (containing the ``app`` package) is on
 # ``sys.path`` **before** importing internal modules. When the script is
@@ -15,26 +16,28 @@ if BASE_DIR not in sys.path:
 
 import streamlit as st
 
+from app.services import template_roots
 from app.views import estimation, mandat, book, settings_keys
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # ---- Default directories ----
-DEFAULT_TPL_DIR = os.path.join(APP_ROOT, "templates")
-DEFAULT_EST_TPL_DIR = os.path.join(DEFAULT_TPL_DIR, "estimation")
-DEFAULT_BOOK_TPL_DIR = os.path.join(DEFAULT_TPL_DIR, "book")
-DEFAULT_MAND_TPL_DIR = os.path.join(DEFAULT_TPL_DIR, "mandat")
-DEFAULT_OUT_DIR = os.path.abspath(os.path.join(APP_ROOT, "..", "output"))
-DEFAULT_IMG_CACHE = os.path.join(DEFAULT_OUT_DIR, "_images_cache")
+DEFAULT_TPL_DIR = os.getenv("MFY_TPL_DIR", str(template_roots.REPO_TEMPLATE_ROOT))
+DEFAULT_EST_TPL_DIR = os.getenv("MFY_EST_TPL_DIR", str(template_roots.ESTIMATION_TPL_DIR))
+DEFAULT_BOOK_TPL_DIR = os.getenv("MFY_BOOK_TPL_DIR", str(template_roots.BOOK_TPL_DIR))
+DEFAULT_MAND_TPL_DIR = os.getenv("MFY_MAND_TPL_DIR", str(template_roots.MANDAT_TPL_DIR))
+DEFAULT_OUT_DIR = os.getenv("MFY_OUT_DIR", os.path.abspath(os.path.join(REPO_ROOT, "output")))
+DEFAULT_IMG_CACHE = os.getenv("MFY_IMG_CACHE_DIR", os.path.join(DEFAULT_OUT_DIR, "_images_cache"))
 
 # ---- Build configuration from environment with fallback to defaults ----
 CONFIG = {
-    "TPL_DIR": os.getenv("MFY_TPL_DIR", DEFAULT_TPL_DIR),
-    "EST_TPL_DIR": os.getenv("MFY_EST_TPL_DIR", DEFAULT_EST_TPL_DIR),
-    "BOOK_TPL_DIR": os.getenv("MFY_BOOK_TPL_DIR", DEFAULT_BOOK_TPL_DIR),
-    "MANDAT_TPL_DIR": os.getenv("MFY_MAND_TPL_DIR", DEFAULT_MAND_TPL_DIR),
-    "OUT_DIR": os.getenv("MFY_OUT_DIR", DEFAULT_OUT_DIR),
-    "IMG_CACHE_DIR": os.getenv("MFY_IMG_CACHE_DIR", DEFAULT_IMG_CACHE),
+    "TPL_DIR": DEFAULT_TPL_DIR,
+    "EST_TPL_DIR": DEFAULT_EST_TPL_DIR,
+    "BOOK_TPL_DIR": DEFAULT_BOOK_TPL_DIR,
+    "MANDAT_TPL_DIR": DEFAULT_MAND_TPL_DIR,
+    "OUT_DIR": DEFAULT_OUT_DIR,
+    "IMG_CACHE_DIR": DEFAULT_IMG_CACHE,
 }
 
 # ---- Ensure directories exist ----
@@ -87,4 +90,3 @@ elif page == "Paramètres / Clés API":
 st.sidebar.markdown("---")
 if st.sidebar.button("Quitter l'application"):
     os._exit(0)
-
