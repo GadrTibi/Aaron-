@@ -3,6 +3,7 @@ from time import perf_counter
 from typing import Iterable, Optional
 
 import streamlit as st
+from streamlit.errors import StreamlitAPIException
 
 from app.services.generation_report import GenerationReport
 from app.services.geocode_cache import get_cached_geocode, normalize_address, set_cached_geocode
@@ -26,6 +27,7 @@ from services.wiki_images import ImageCandidate, WikiImageService
 
 from .utils import (
     _sanitize_filename,
+    apply_pending_fields,
     list_templates,
     render_generation_report,
     render_template_validation,
@@ -293,31 +295,14 @@ def render(config):
         key="radius_m",
         help="Distance utilisée pour les lieux et transports.",
     )
-    quartier_intro = st.text_area(
-        "Intro quartier (2-3 phrases)",
-        st.session_state.get("quartier_intro", "Texte libre saisi par l'utilisateur."),
-        key="quartier_intro",
+    for key in ("quartier_intro", "transports_metro_texte", "transports_bus_texte", "transports_taxi_texte"):
+        st.session_state.setdefault(key, "")
+
+    apply_pending_fields(
+        st.session_state,
+        "_quartier_pending",
+        ("quartier_intro", "transports_metro_texte", "transports_bus_texte", "transports_taxi_texte"),
     )
-    st.session_state["q_txt"] = quartier_intro
-    col_q1, col_q2 = st.columns([1, 1])
-    with col_q1:
-        metro_txt = st.text_area(
-            "Transports métro (3-4 lignes)",
-            st.session_state.get("transports_metro_texte", ""),
-            key="transports_metro_texte",
-        )
-        bus_txt = st.text_area(
-            "Transports bus (3-4 lignes)",
-            st.session_state.get("transports_bus_texte", ""),
-            key="transports_bus_texte",
-        )
-    with col_q2:
-        taxi_txt = st.text_area(
-            "Transports taxi (1-2 lignes)",
-            st.session_state.get("transports_taxi_texte", ""),
-            key="transports_taxi_texte",
-        )
-        st.session_state["q_tx"] = taxi_txt
 
     col_btn, col_hint = st.columns([1, 2])
     with col_btn:
@@ -332,16 +317,41 @@ def render(config):
         with st.spinner("Enrichissement quartier & transports…"):
             try:
                 payload = enrich_quartier_and_transports(addr_raw, report=run_report)
-                st.session_state.update(payload)
-                st.session_state["q_txt"] = payload.get("quartier_intro", quartier_intro)
-                st.session_state["q_tx"] = payload.get("transports_taxi_texte", taxi_txt)
-                quartier_intro = payload.get("quartier_intro", quartier_intro)
-                metro_txt = payload.get("transports_metro_texte", metro_txt)
-                bus_txt = payload.get("transports_bus_texte", bus_txt)
-                taxi_txt = payload.get("transports_taxi_texte", taxi_txt)
-                st.success("Enrichissement réalisé.")
+                st.session_state["_quartier_pending"] = {
+                    "quartier_intro": payload.get("quartier_intro", st.session_state.get("quartier_intro", "")),
+                    "transports_metro_texte": payload.get("transports_metro_texte", st.session_state.get("transports_metro_texte", "")),
+                    "transports_bus_texte": payload.get("transports_bus_texte", st.session_state.get("transports_bus_texte", "")),
+                    "transports_taxi_texte": payload.get("transports_taxi_texte", st.session_state.get("transports_taxi_texte", "")),
+                }
+                st.rerun()
             except Exception as exc:
-                st.error(f"LLM indisponible: {exc}")
+                message = str(exc)
+                if isinstance(exc, StreamlitAPIException) or "cannot be modified after the widget" in message:
+                    st.error("Erreur UI Streamlit: mise à jour des champs après instanciation. Correctif appliqué.")
+                else:
+                    st.error(f"LLM indisponible: {exc}")
+
+    quartier_intro = st.text_area(
+        "Intro quartier (2-3 phrases)",
+        key="quartier_intro",
+    )
+    st.session_state["q_txt"] = quartier_intro
+    col_q1, col_q2 = st.columns([1, 1])
+    with col_q1:
+        metro_txt = st.text_area(
+            "Transports métro (3-4 lignes)",
+            key="transports_metro_texte",
+        )
+        bus_txt = st.text_area(
+            "Transports bus (3-4 lignes)",
+            key="transports_bus_texte",
+        )
+    with col_q2:
+        taxi_txt = st.text_area(
+            "Transports taxi (1-2 lignes)",
+            key="transports_taxi_texte",
+        )
+        st.session_state["q_tx"] = taxi_txt
 
     with st.expander("Ancienne méthode (debug)", expanded=False):
         perf_transports: dict[str, object] = {}

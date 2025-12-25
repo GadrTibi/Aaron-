@@ -1,5 +1,6 @@
 import os
 import re
+from collections.abc import MutableMapping
 import streamlit as st
 
 from app.services.generation_report import GenerationReport
@@ -74,3 +75,22 @@ def render_template_validation(result: ValidationResult | None, *, strict: bool 
             st.caption(f"• {note}")
     if strict and status == "KO":
         st.error("Mode strict : génération bloquée tant que la validation est KO.")
+
+
+def apply_pending_fields(
+    state: MutableMapping[str, object],
+    pending_key: str,
+    target_keys: tuple[str, ...],
+) -> bool:
+    """
+    Applique les valeurs en attente stockées dans `pending_key` sur `state` puis
+    supprime la clé pending. Retourne True si quelque chose a été appliqué.
+    """
+    pending = state.get(pending_key)
+    if not isinstance(pending, dict):
+        return False
+    for key in target_keys:
+        if key in pending:
+            state[key] = pending[key]
+    state.pop(pending_key, None)
+    return True
