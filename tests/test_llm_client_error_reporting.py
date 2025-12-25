@@ -16,4 +16,4 @@ def test_invoke_llm_json_adds_warning(monkeypatch):
     with pytest.raises(RuntimeError):
         llm_client.invoke_llm_json("test", {"type": "object"}, report)
 
-    assert any("LLM" in warn for warn in report.provider_warnings)
+    assert any("network down" in warn for warn in report.provider_warnings)

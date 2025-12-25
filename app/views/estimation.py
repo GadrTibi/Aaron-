@@ -341,7 +341,7 @@ def render(config):
                 taxi_txt = payload.get("transports_taxi_texte", taxi_txt)
                 st.success("Enrichissement réalisé.")
             except Exception as exc:
-                st.warning(str(exc))
+                st.error(f"LLM indisponible: {exc}")
 
     with st.expander("Ancienne méthode (debug)", expanded=False):
         perf_transports: dict[str, object] = {}
