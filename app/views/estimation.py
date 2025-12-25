@@ -24,6 +24,7 @@ from app.services import template_roots
 from app.services.transports_facade import get_transports
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.template_validation import validate_pptx_template
+from app.services.token_aliases import apply_token_aliases
 from services.image_uploads import save_uploaded_image
 from services.wiki_images import ImageCandidate, WikiImageService
 
@@ -877,6 +878,15 @@ def render(config):
         "[[PRIX_CIBLE]]": f"{PRIX_CIBLE:.0f} €",
         "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",
     }
+
+    mapping_keys_before_aliases = set(mapping.keys())
+    mapping = apply_token_aliases(mapping)
+    applied_aliases = sorted(k for k in mapping if k not in mapping_keys_before_aliases)
+
+    with st.expander("Debug mapping injection", expanded=False):
+        alias_label = ", ".join(applied_aliases) if applied_aliases else "aucun"
+        st.caption(f"Aliases appliqués: {alias_label}")
+        st.json(mapping)
 
     # Images for VISITE_1/2 (from confirmed paths or uploaded files)
     image_by_shape = {}
