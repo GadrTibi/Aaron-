@@ -19,6 +19,11 @@ from app.services.pptx_requirements import (
     get_estimation_detectors,
     get_estimation_requirements,
 )
+from app.services.template_tokens import (
+    QUARTIER_TRANSPORT_SESSION_KEYS,
+    build_quartier_transport_tokens_mapping,
+    migrate_quartier_transport_session,
+)
 from app.services.template_catalog import TemplateItem, list_effective_templates
 from app.services import template_roots
 from app.services.transports_facade import get_transports
@@ -351,13 +356,14 @@ def render(config):
         key="radius_m",
         help="Distance utilisée pour les lieux et transports.",
     )
-    for key in ("quartier_intro", "transports_metro_texte", "transports_bus_texte", "transports_taxi_texte"):
+    migrate_quartier_transport_session(st.session_state)
+    for key in QUARTIER_TRANSPORT_SESSION_KEYS:
         st.session_state.setdefault(key, "")
 
     apply_pending_fields(
         st.session_state,
         "_quartier_pending",
-        ("quartier_intro", "transports_metro_texte", "transports_bus_texte", "transports_taxi_texte"),
+        QUARTIER_TRANSPORT_SESSION_KEYS,
     )
 
     col_btn, col_hint = st.columns([1, 2])
@@ -379,9 +385,9 @@ def render(config):
                 payload = enrich_quartier_and_transports(addr_raw, report=run_report)
                 st.session_state["_quartier_pending"] = {
                     "quartier_intro": payload.get("quartier_intro", st.session_state.get("quartier_intro", "")),
-                    "transports_metro_texte": payload.get("transports_metro_texte", st.session_state.get("transports_metro_texte", "")),
-                    "transports_bus_texte": payload.get("transports_bus_texte", st.session_state.get("transports_bus_texte", "")),
-                    "transports_taxi_texte": payload.get("transports_taxi_texte", st.session_state.get("transports_taxi_texte", "")),
+                    "transport_metro_texte": payload.get("transport_metro_texte", st.session_state.get("transport_metro_texte", "")),
+                    "transport_bus_texte": payload.get("transport_bus_texte", st.session_state.get("transport_bus_texte", "")),
+                    "transport_taxi_texte": payload.get("transport_taxi_texte", st.session_state.get("transport_taxi_texte", "")),
                 }
                 st.rerun()
             except Exception as exc:
@@ -400,16 +406,16 @@ def render(config):
     with col_q1:
         metro_txt = st.text_area(
             "Transports métro (3-4 lignes)",
-            key="transports_metro_texte",
+            key="transport_metro_texte",
         )
         bus_txt = st.text_area(
             "Transports bus (3-4 lignes)",
-            key="transports_bus_texte",
+            key="transport_bus_texte",
         )
     with col_q2:
         taxi_txt = st.text_area(
             "Transports taxi (1-2 lignes)",
-            key="transports_taxi_texte",
+            key="transport_taxi_texte",
         )
         st.session_state["q_tx"] = taxi_txt
 
@@ -438,6 +444,14 @@ def render(config):
                         st.session_state["q_tx"] = ", ".join(tr.get("taxis", []))
                         st.session_state["metro_lines_auto"] = tr.get("metro_lines", [])
                         st.session_state["bus_lines_auto"] = tr.get("bus_lines", [])
+                        metro_refs_tokens = _collect_line_refs(st.session_state["metro_lines_auto"], limit=3)
+                        bus_refs_tokens = _collect_line_refs(st.session_state["bus_lines_auto"], limit=3)
+                        if not st.session_state.get("transport_metro_texte"):
+                            st.session_state["transport_metro_texte"] = ", ".join(metro_refs_tokens)
+                        if not st.session_state.get("transport_bus_texte"):
+                            st.session_state["transport_bus_texte"] = ", ".join(bus_refs_tokens)
+                        if not st.session_state.get("transport_taxi_texte") and st.session_state.get("q_tx"):
+                            st.session_state["transport_taxi_texte"] = st.session_state["q_tx"]
                         st.session_state["transport_providers"] = tr.get("provider_used", {})
                         new_warnings = run_report.provider_warnings[warning_count:]
                         for warning in new_warnings:
@@ -463,6 +477,9 @@ def render(config):
                 st.session_state['metro_lines_auto'] = []
                 st.session_state['bus_lines_auto'] = []
                 st.session_state['transport_providers'] = {}
+                st.session_state["transport_metro_texte"] = st.session_state.get("transport_metro_texte", "")
+                st.session_state["transport_bus_texte"] = st.session_state.get("transport_bus_texte", "")
+                st.session_state["transport_taxi_texte"] = st.session_state.get("transport_taxi_texte", "")
             if geocode_debug:
                 with st.expander("Détails performance", expanded=True):
                     if perf_geocode:
@@ -830,23 +847,10 @@ def render(config):
             st.caption("Graphique non généré pour le moment.")
 
     # Mapping Estimation
-    metro = st.session_state.get('metro_lines_auto') or []
-    bus = st.session_state.get('bus_lines_auto') or []
-    metro_refs_tokens = _collect_line_refs(metro, limit=3)
-    bus_refs_tokens = _collect_line_refs(bus, limit=3)
-    metro_str = ", ".join(metro_refs_tokens)
-    bus_str = ", ".join(bus_refs_tokens)
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
-        "[[QUARTIER_TEXTE]]": st.session_state.get("q_txt",""),
-        "[[TRANSPORT_TAXI_TEXTE]]": st.session_state.get('q_tx', ''),
-        "[[TRANSPORT_METRO_TEXTE]]": metro_str,
-        "[[TRANSPORT_BUS_TEXTE]]": bus_str,
-        "[[QUARTIER_INTRO]]": st.session_state.get("quartier_intro", ""),
-        "[[TRANSPORTS_METRO_TEXTE]]": st.session_state.get("transports_metro_texte", ""),
-        "[[TRANSPORTS_BUS_TEXTE]]": st.session_state.get("transports_bus_texte", ""),
-        "[[TRANSPORTS_TAXI_TEXTE]]": st.session_state.get("transports_taxi_texte", ""),
+        **build_quartier_transport_tokens_mapping(st.session_state),
         "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
         "[[INCONTOURNABLE_2_NOM]]": st.session_state.get('i2', ''),
         "[[INCONTOURNABLE_3_NOM]]": st.session_state.get('i3', ''),

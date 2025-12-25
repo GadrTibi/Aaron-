@@ -45,9 +45,9 @@ def build_book_mapping(ss: dict) -> dict:
     bus_auto = ss.get('bus_lines_auto') or []
     taxi_txt = ss.get('q_tx', "")
     quartier_intro = ss.get("quartier_intro", "")
-    transports_metro_texte = ss.get("transports_metro_texte", ", ".join(_collect_line_refs(metro_auto)))
-    transports_bus_texte = ss.get("transports_bus_texte", ", ".join(_collect_line_refs(bus_auto)))
-    transports_taxi_texte = ss.get("transports_taxi_texte", taxi_txt)
+    transport_metro_texte = ss.get("transport_metro_texte") or ss.get("transports_metro_texte") or ", ".join(_collect_line_refs(metro_auto))
+    transport_bus_texte = ss.get("transport_bus_texte") or ss.get("transports_bus_texte") or ", ".join(_collect_line_refs(bus_auto))
+    transport_taxi_texte = ss.get("transport_taxi_texte") or ss.get("transports_taxi_texte") or taxi_txt
 
     metro_refs = _collect_line_refs(metro_auto)
     bus_refs = _collect_line_refs(bus_auto)
@@ -59,21 +59,14 @@ def build_book_mapping(ss: dict) -> dict:
         "[[ADRESSE]]": adresse,
         "[[BOOK_ADRESSE]]": adresse,
 
-        # Convention “Estimation” pour les transports
-        "[[TRANSPORT_TAXI_TEXTE]]": taxi_txt,
-        "[[TRANSPORT_METRO_TEXTE]]": metro_str,
-        "[[TRANSPORT_BUS_TEXTE]]": bus_str,
-
-        # Nouveau format enrichi quartier/transports
+        # Format enrichi quartier/transports
         "[[QUARTIER_INTRO]]": quartier_intro,
-        "[[TRANSPORTS_METRO_TEXTE]]": transports_metro_texte,
-        "[[TRANSPORTS_BUS_TEXTE]]": transports_bus_texte,
-        "[[TRANSPORTS_TAXI_TEXTE]]": transports_taxi_texte,
+        "[[TRANSPORT_METRO_TEXTE]]": transport_metro_texte,
+        "[[TRANSPORT_BUS_TEXTE]]": transport_bus_texte,
+        "[[TRANSPORT_TAXI_TEXTE]]": transport_taxi_texte,
 
         # Compatibilité alternative (si le template Book utilise ces noms)
-        "[[TAXI_TEXTE]]": taxi_txt,
-        "[[TRANSPORT_METRO_TEXTE]]": metro_str,
-        "[[TRANSPORT_BUS_TEXTE]]": bus_str,
+        "[[TAXI_TEXTE]]": transport_taxi_texte,
 
         # Slide 5 (Instructions)
         "[[PORTE_ENTREE_TEXTE]]": ss.get("bk_porte_entree_texte", ""),

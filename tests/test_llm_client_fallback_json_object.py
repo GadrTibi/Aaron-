@@ -27,9 +27,9 @@ def test_fallback_to_json_object(monkeypatch):
             def json(self):
                 payload = {
                     "quartier_intro": "intro",
-                    "transports_metro_texte": "metro",
-                    "transports_bus_texte": "bus",
-                    "transports_taxi_texte": "taxi",
+                    "transport_metro_texte": "metro",
+                    "transport_bus_texte": "bus",
+                    "transport_taxi_texte": "taxi",
                 }
                 return {"output_text": __import__("json").dumps(payload)}
 
