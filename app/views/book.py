@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 
 import streamlit as st
 
+from app.services import template_roots
 from app.services.book_pdf import build_book_pdf
 from app.services.book_tokens import build_book_mapping
 from app.services.generation_report import GenerationReport
@@ -15,11 +17,11 @@ from app.services.map_image import build_static_map
 from app.services.poi import fetch_transports, list_metro_lines, list_bus_lines
 from app.services.pptx_requirements import get_book_detectors, get_book_requirements
 from app.services.pptx_fill import generate_book_pptx
+from app.services.template_catalog import TemplateItem, list_effective_templates
 from app.services.template_validation import validate_pptx_template
 
 from .utils import (
     _sanitize_filename,
-    list_templates,
     render_generation_report,
     render_template_validation,
 )
@@ -82,39 +84,83 @@ def render(config: dict) -> None:
 
     # ---- Template management ----
     st.subheader("Templates Book (PPTX)")
-    st.caption(f"Dossier : {BOOK_TPL_DIR}")
-    book_list = list_templates(BOOK_TPL_DIR, "pptx")
-    uploaded_book = st.file_uploader(
-        "Ajouter des templates PPTX (Book)",
-        type=["pptx"],
-        accept_multiple_files=True,
-        key="up_book",
-    )
-    if uploaded_book:
-        saved = 0
-        for up in uploaded_book:
-            safe_name = _sanitize_filename(up.name, "pptx")
-            dst = os.path.join(BOOK_TPL_DIR, safe_name)
-            if os.path.exists(dst):
-                base, ext = os.path.splitext(safe_name)
-                i = 2
-                while os.path.exists(os.path.join(BOOK_TPL_DIR, f"{base} ({i}){ext}")):
-                    i += 1
-                dst = os.path.join(BOOK_TPL_DIR, f"{base} ({i}){ext}")
-            with open(dst, "wb") as f:
-                f.write(up.getbuffer())
-            saved += 1
-        st.success(f"{saved} template(s) ajouté(s).")
-        book_list = list_templates(BOOK_TPL_DIR, "pptx")
-    chosen_book = st.selectbox(
-        "Choisir le template Book (PPTX)",
-        options=book_list if book_list else ["(aucun)"]
-    )
+    st.caption(f"Templates serveur (Git) : {template_roots.BOOK_TPL_DIR}")
 
-    def resolve_book_path(label: str | None) -> str | None:
-        if not label or label == "(aucun)":
-            return None
-        return os.path.join(BOOK_TPL_DIR, label)
+    def _select_template(select_key: str) -> TemplateItem | None:
+        effective = list_effective_templates("book")
+        repo_items = [tpl for tpl in effective if tpl.source == "repo"]
+        legacy_items = [tpl for tpl in effective if tpl.source != "repo"]
+        selected: TemplateItem | None = None
+
+        if repo_items:
+            label = st.selectbox(
+                "Templates serveur (Git)",
+                options=[tpl.label for tpl in repo_items],
+                key=f"{select_key}_repo",
+            )
+            selected = next((tpl for tpl in repo_items if tpl.label == label), None)
+        else:
+            st.warning("Aucun template trouvé dans templates/book. Ajoutez-en via Git.")
+            if legacy_items:
+                label = st.selectbox(
+                    "Templates hérités (MFY_* ou dossiers locaux)",
+                    options=[tpl.label for tpl in legacy_items],
+                    key=f"{select_key}_legacy",
+                )
+                selected = next((tpl for tpl in legacy_items if tpl.label == label), None)
+        return selected
+
+    selected_template = _select_template("book_tpl")
+
+    with st.expander("Template uploadé (non persistant)", expanded=False):
+        st.caption("Les fichiers déposés ici ne sont pas persistants sur Streamlit Community Cloud.")
+        uploaded_book = st.file_uploader(
+            "Ajouter des templates PPTX (Book)",
+            type=["pptx"],
+            accept_multiple_files=True,
+            key="up_book",
+        )
+        book_upload_dir = Path(BOOK_TPL_DIR)
+        if uploaded_book:
+            book_upload_dir.mkdir(parents=True, exist_ok=True)
+            saved = 0
+            for up in uploaded_book:
+                safe_name = _sanitize_filename(up.name, "pptx")
+                dst = book_upload_dir / safe_name
+                if dst.exists():
+                    base = dst.stem
+                    ext = dst.suffix
+                    i = 2
+                    candidate = book_upload_dir / f"{base} ({i}){ext}"
+                    while candidate.exists():
+                        i += 1
+                        candidate = book_upload_dir / f"{base} ({i}){ext}"
+                    dst = candidate
+                with open(dst, "wb") as f:
+                    f.write(up.getbuffer())
+                saved += 1
+            st.success(f"{saved} template(s) ajouté(s).")
+            st.toast("Rafraîchissez la sélection ci-dessus pour utiliser les templates ajoutés.")
+
+        upload_items: list[TemplateItem] = []
+        if book_upload_dir.resolve() != template_roots.BOOK_TPL_DIR.resolve():
+            upload_items = [
+                TemplateItem(label=p.name, source="uploaded", path=p)
+                for p in book_upload_dir.iterdir()
+                if p.is_file() and p.suffix.lower() == ".pptx"
+            ]
+        if upload_items:
+            use_uploaded = st.checkbox(
+                "Utiliser un template uploadé (non persistant)",
+                key="use_book_uploaded",
+            )
+            if use_uploaded:
+                label = st.selectbox(
+                    "Templates uploadés",
+                    options=[tpl.label for tpl in upload_items],
+                    key="book_uploaded_select",
+                )
+                selected_template = next((tpl for tpl in upload_items if tpl.label == label), selected_template)
 
     # ---- Adresse & transports ----
     st.subheader("Adresse & transports (Slide 4)")
@@ -238,7 +284,7 @@ def render(config: dict) -> None:
         image_by_shape["APPARTEMENT_MASK"] = st.session_state["book_img_appart"]
 
     strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
-    tpl_for_validation = resolve_book_path(chosen_book)
+    tpl_for_validation = selected_template.path if selected_template else None
     validation_result = None
     if tpl_for_validation and os.path.exists(tpl_for_validation):
         try:
@@ -258,7 +304,7 @@ def render(config: dict) -> None:
     with col1:
         disable_generate = strict_mode and validation_result is not None and validation_result.severity == "KO"
         if st.button("Générer le Book (PPTX)", disabled=disable_generate):
-            tpl = resolve_book_path(chosen_book)
+            tpl = selected_template.path if selected_template else None
             if not tpl or not os.path.exists(tpl):
                 st.error("Aucun template Book PPTX sélectionné. Déposez/choisissez un template ci-dessus.")
                 st.stop()

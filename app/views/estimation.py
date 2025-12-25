@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Optional
 
@@ -18,6 +19,8 @@ from app.services.pptx_requirements import (
     get_estimation_detectors,
     get_estimation_requirements,
 )
+from app.services.template_catalog import TemplateItem, list_effective_templates
+from app.services import template_roots
 from app.services.transports_facade import get_transports
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.template_validation import validate_pptx_template
@@ -27,7 +30,6 @@ from services.wiki_images import ImageCandidate, WikiImageService
 from .utils import (
     _sanitize_filename,
     apply_pending_fields,
-    list_templates,
     render_generation_report,
     render_template_validation,
 )
@@ -159,34 +161,83 @@ def render(config):
 
     # ---- Templates Estimation (PPTX) ----
     st.subheader("Templates Estimation (PPTX)")
-    st.caption(f"Dossier : {EST_TPL_DIR}")
-    est_list = list_templates(EST_TPL_DIR, "pptx")
-    uploaded_tpls = st.file_uploader("Ajouter des templates PPTX", type=["pptx"], accept_multiple_files=True, key="up_est")
-    if uploaded_tpls:
-        saved = 0
-        for up in uploaded_tpls:
-            safe_name = _sanitize_filename(up.name, "pptx")
-            dst = os.path.join(EST_TPL_DIR, safe_name)
-            if os.path.exists(dst):
-                base, ext = os.path.splitext(safe_name); i = 2
-                while os.path.exists(os.path.join(EST_TPL_DIR, f"{base} ({i}){ext}")):
-                    i += 1
-                dst = os.path.join(EST_TPL_DIR, f"{base} ({i}){ext}")
-            with open(dst, "wb") as f:
-                f.write(up.getbuffer())
-            saved += 1
-        st.success(f"{saved} template(s) ajouté(s).")
-        est_list = list_templates(EST_TPL_DIR, "pptx")
-    legacy_est = os.path.join(TPL_DIR, "estimation_template.pptx")
-    has_legacy_est = os.path.exists(legacy_est)
-    options = (["estimation_template.pptx (héritage)"] if has_legacy_est else []) + est_list
-    chosen_est = st.selectbox("Choisir le template Estimation", options=options if options else ["(aucun)"])
-    def resolve_est_path(label: str):
-        if not label or label == "(aucun)":
-            return None
-        if label == "estimation_template.pptx (héritage)":
-            return legacy_est
-        return os.path.join(EST_TPL_DIR, label)
+    st.caption(f"Templates serveur (Git) : {template_roots.ESTIMATION_TPL_DIR}")
+
+    def _select_template(kind: str, *, select_key: str) -> TemplateItem | None:
+        effective = list_effective_templates(kind)
+        repo_items = [tpl for tpl in effective if tpl.source == "repo"]
+        legacy_items = [tpl for tpl in effective if tpl.source != "repo"]
+        selected: TemplateItem | None = None
+
+        if repo_items:
+            label = st.selectbox(
+                "Templates serveur (Git)",
+                options=[tpl.label for tpl in repo_items],
+                key=f"{select_key}_repo",
+            )
+            selected = next((tpl for tpl in repo_items if tpl.label == label), None)
+        else:
+            st.warning("Aucun template trouvé dans templates/estimation. Ajoutez-en via Git.")
+            if legacy_items:
+                label = st.selectbox(
+                    "Templates hérités (MFY_* ou dossiers locaux)",
+                    options=[tpl.label for tpl in legacy_items],
+                    key=f"{select_key}_legacy",
+                )
+                selected = next((tpl for tpl in legacy_items if tpl.label == label), None)
+        return selected
+
+    selected_template = _select_template("estimation", select_key="estimation_tpl")
+
+    with st.expander("Template uploadé (non persistant)", expanded=False):
+        st.caption("Les fichiers déposés ici ne sont pas persistants sur Streamlit Community Cloud.")
+        uploaded_tpls = st.file_uploader(
+            "Ajouter des templates PPTX",
+            type=["pptx"],
+            accept_multiple_files=True,
+            key="up_est",
+        )
+        est_upload_dir = Path(EST_TPL_DIR)
+        if uploaded_tpls:
+            est_upload_dir.mkdir(parents=True, exist_ok=True)
+            saved = 0
+            for up in uploaded_tpls:
+                safe_name = _sanitize_filename(up.name, "pptx")
+                dst = est_upload_dir / safe_name
+                if dst.exists():
+                    base = dst.stem
+                    ext = dst.suffix
+                    i = 2
+                    candidate = est_upload_dir / f"{base} ({i}){ext}"
+                    while candidate.exists():
+                        i += 1
+                        candidate = est_upload_dir / f"{base} ({i}){ext}"
+                    dst = candidate
+                with open(dst, "wb") as f:
+                    f.write(up.getbuffer())
+                saved += 1
+            st.success(f"{saved} template(s) ajouté(s).")
+            st.toast("Rafraîchissez la sélection ci-dessus pour utiliser les templates ajoutés.")
+
+        upload_items: list[TemplateItem] = []
+        if est_upload_dir.resolve() != template_roots.ESTIMATION_TPL_DIR.resolve():
+            upload_items = [
+                TemplateItem(label=p.name, source="uploaded", path=p)
+                for p in est_upload_dir.iterdir()
+                if p.is_file() and p.suffix.lower() == ".pptx"
+            ]
+        if upload_items:
+            use_uploaded = st.checkbox(
+                "Utiliser un template uploadé (non persistant)",
+                key="use_est_uploaded",
+            )
+            if use_uploaded:
+                label = st.selectbox(
+                    "Templates uploadés",
+                    options=[tpl.label for tpl in upload_items],
+                    key="estimation_uploaded_select",
+                )
+                selected_template = next((tpl for tpl in upload_items if tpl.label == label), selected_template)
 
     geocode_debug = st.checkbox("Debug géocodage", key="geocode_debug_toggle")
 
@@ -858,7 +909,7 @@ def render(config):
     print("DBG image_by_shape (final):", image_by_shape)
 
     strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
-    est_tpl_path = resolve_est_path(chosen_est)
+    est_tpl_path = selected_template.path if selected_template else None
     validation_result = None
     if est_tpl_path and os.path.exists(est_tpl_path):
         try:
