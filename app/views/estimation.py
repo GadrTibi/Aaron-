@@ -19,6 +19,13 @@ from app.services.pptx_requirements import (
     get_estimation_detectors,
     get_estimation_requirements,
 )
+from app.services.text_limits import (
+    MAX_QUARTIER_INTRO,
+    MAX_TRANSPORT_BUS,
+    MAX_TRANSPORT_METRO,
+    MAX_TRANSPORT_TAXI,
+)
+from app.services.text_utils import truncate_clean
 from app.services.template_tokens import (
     QUARTIER_TRANSPORT_SESSION_KEYS,
     build_quartier_transport_tokens_mapping,
@@ -400,6 +407,7 @@ def render(config):
     quartier_intro = st.text_area(
         "Intro quartier (2-3 phrases)",
         key="quartier_intro",
+        help=f"Max {MAX_QUARTIER_INTRO} caractères.",
     )
     st.session_state["q_txt"] = quartier_intro
     col_q1, col_q2 = st.columns([1, 1])
@@ -407,17 +415,23 @@ def render(config):
         metro_txt = st.text_area(
             "Transports métro (3-4 lignes)",
             key="transport_metro_texte",
+            help=f"Max {MAX_TRANSPORT_METRO} caractères.",
         )
+        st.caption(f"{len(metro_txt)}/{MAX_TRANSPORT_METRO}")
         bus_txt = st.text_area(
             "Transports bus (3-4 lignes)",
             key="transport_bus_texte",
+            help=f"Max {MAX_TRANSPORT_BUS} caractères.",
         )
+        st.caption(f"{len(bus_txt)}/{MAX_TRANSPORT_BUS}")
     with col_q2:
         taxi_txt = st.text_area(
             "Transports taxi (1-2 lignes)",
             key="transport_taxi_texte",
+            help=f"Max {MAX_TRANSPORT_TAXI} caractères.",
         )
         st.session_state["q_tx"] = taxi_txt
+        st.caption(f"{len(taxi_txt)}/{MAX_TRANSPORT_TAXI}")
 
     with st.expander("Ancienne méthode (debug)", expanded=False):
         perf_transports: dict[str, object] = {}
@@ -846,11 +860,38 @@ def render(config):
         elif not histo_error:
             st.caption("Graphique non généré pour le moment.")
 
+    truncation_notes: list[str] = []
+
+    def _truncate_field(key: str, max_len: int, label: str) -> str:
+        value = st.session_state.get(key, "") or ""
+        truncated, was_truncated = truncate_clean(value, max_len)
+        st.session_state[key] = truncated
+        if was_truncated:
+            warning_msg = f"{label} tronqué à {max_len} caractères pour s’adapter au template."
+            st.warning(warning_msg)
+            truncation_notes.append(warning_msg)
+        return truncated
+
+    quartier_intro_final = _truncate_field("quartier_intro", MAX_QUARTIER_INTRO, "Texte quartier")
+    metro_txt_final = _truncate_field("transport_metro_texte", MAX_TRANSPORT_METRO, "Texte métro")
+    bus_txt_final = _truncate_field("transport_bus_texte", MAX_TRANSPORT_BUS, "Texte bus")
+    taxi_txt_final = _truncate_field("transport_taxi_texte", MAX_TRANSPORT_TAXI, "Texte taxi")
+
+    if truncation_notes:
+        run_report.add_note("; ".join(truncation_notes))
+
     # Mapping Estimation
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
-        **build_quartier_transport_tokens_mapping(st.session_state),
+        **build_quartier_transport_tokens_mapping(
+            {
+                "quartier_intro": quartier_intro_final,
+                "transport_metro_texte": metro_txt_final,
+                "transport_bus_texte": bus_txt_final,
+                "transport_taxi_texte": taxi_txt_final,
+            }
+        ),
         "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
         "[[INCONTOURNABLE_2_NOM]]": st.session_state.get('i2', ''),
         "[[INCONTOURNABLE_3_NOM]]": st.session_state.get('i3', ''),
