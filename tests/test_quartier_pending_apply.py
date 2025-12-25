@@ -6,19 +6,19 @@ def test_apply_pending_fields_applies_and_clears():
         "quartier_intro": "Ancienne intro",
         "_quartier_pending": {
             "quartier_intro": "Nouvelle intro",
-            "transports_bus_texte": "Bus à jour",
+            "transport_bus_texte": "Bus à jour",
         },
     }
 
     applied = apply_pending_fields(
         state,
         "_quartier_pending",
-        ("quartier_intro", "transports_metro_texte", "transports_bus_texte", "transports_taxi_texte"),
+        ("quartier_intro", "transport_metro_texte", "transport_bus_texte", "transport_taxi_texte"),
     )
 
     assert applied is True
     assert state["quartier_intro"] == "Nouvelle intro"
-    assert state["transports_bus_texte"] == "Bus à jour"
+    assert state["transport_bus_texte"] == "Bus à jour"
     assert "_quartier_pending" not in state
 
 
@@ -28,7 +28,7 @@ def test_apply_pending_fields_no_pending_returns_false():
     applied = apply_pending_fields(
         state,
         "_quartier_pending",
-        ("quartier_intro", "transports_metro_texte", "transports_bus_texte", "transports_taxi_texte"),
+        ("quartier_intro", "transport_metro_texte", "transport_bus_texte", "transport_taxi_texte"),
     )
 
     assert applied is False

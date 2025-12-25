@@ -5,21 +5,26 @@ from typing import Any, Dict, Optional
 
 from app.services.generation_report import GenerationReport
 from app.services.llm_client import invoke_llm_json
+LEGACY_LLM_KEYS = {
+    "transport_metro_texte": "transports_metro_texte",
+    "transport_bus_texte": "transports_bus_texte",
+    "transport_taxi_texte": "transports_taxi_texte",
+}
 
 
 SCHEMA = {
     "type": "object",
     "properties": {
         "quartier_intro": {"type": "string"},
-        "transports_metro_texte": {"type": "string"},
-        "transports_bus_texte": {"type": "string"},
-        "transports_taxi_texte": {"type": "string"},
+        "transport_metro_texte": {"type": "string"},
+        "transport_bus_texte": {"type": "string"},
+        "transport_taxi_texte": {"type": "string"},
     },
     "required": [
         "quartier_intro",
-        "transports_metro_texte",
-        "transports_bus_texte",
-        "transports_taxi_texte",
+        "transport_metro_texte",
+        "transport_bus_texte",
+        "transport_taxi_texte",
     ],
 }
 
@@ -36,9 +41,9 @@ def _build_prompt(address: str) -> str:
         "- Sortie : JSON strict, pas d'autres textes.\n"
         "- Format des champs :\n"
         "  quartier_intro : 2-3 phrases max (ambiance, repères).\n"
-        "  transports_metro_texte : 3-4 lignes max, format 'Ligne X (Station Y) - Xmin à pied'.\n"
-        "  transports_bus_texte : 3-4 lignes max, format concis.\n"
-        "  transports_taxi_texte : 1-2 lignes max ou 'Non disponible' si rien.\n"
+        "  transport_metro_texte : 3-4 lignes max, format 'Ligne X (Station Y) - Xmin à pied'.\n"
+        "  transport_bus_texte : 3-4 lignes max, format concis.\n"
+        "  transport_taxi_texte : 1-2 lignes max ou 'Non disponible' si rien.\n"
         "Réponds en JSON avec ce format exact et uniquement en JSON."
     ).format(address=address)
 
@@ -47,11 +52,12 @@ def _validate_payload(data: Dict[str, Any]) -> Dict[str, str]:
     output: Dict[str, str] = {}
     for key in (
         "quartier_intro",
-        "transports_metro_texte",
-        "transports_bus_texte",
-        "transports_taxi_texte",
+        "transport_metro_texte",
+        "transport_bus_texte",
+        "transport_taxi_texte",
     ):
-        value = _clean(str(data.get(key, "")))
+        legacy_key = LEGACY_LLM_KEYS.get(key, "")
+        value = _clean(str(data.get(key, data.get(legacy_key, ""))))
         if not value:
             raise ValueError(f"Champ '{key}' manquant ou vide dans la réponse LLM.")
         output[key] = value

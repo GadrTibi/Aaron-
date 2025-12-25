@@ -56,7 +56,7 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
   ```
   Des fichiers `.gitkeep` maintiennent l’arborescence si aucun template n’est encore ajouté.
 - Recommandations de nommage : suffixer par le type (`estimation_classique.pptx`, `mandat_meuble.docx`, `book_fr.pptx`) pour apparaître triés alphabétiquement dans l’UI.
-- Tokens essentiels à prévoir dans les templates Estimation : `[[QUARTIER_INTRO]]`, `[[TRANSPORTS_METRO_TEXTE]]`, `[[TRANSPORTS_BUS_TEXTE]]`, `[[TRANSPORTS_TAXI_TEXTE]]`, `[[TRANSPORT_METRO_TEXTE]]`, `[[TRANSPORT_BUS_TEXTE]]`, `[[QUARTIER_TEXTE]]` pour injecter les textes quartier/transports générés. 【app/views/estimation.py†L835-L863】
+- Tokens essentiels à prévoir dans les templates Estimation : `[[QUARTIER_INTRO]]`, `[[TRANSPORT_METRO_TEXTE]]`, `[[TRANSPORT_BUS_TEXTE]]`, `[[TRANSPORT_TAXI_TEXTE]]`, `[[QUARTIER_TEXTE]]` pour injecter les textes quartier/transports générés. 【app/views/estimation.py†L835-L863】
 - Uploads via l’UI : possibles mais non persistants en cloud (disque éphémère). Les templates Git restent la source de vérité en production Streamlit.
 - Validation pré-génération : chaque page affiche une section « Validation du template » listant tokens inconnus et shapes manquantes ; en mode strict, un statut KO désactive la génération. 【app/views/estimation.py†L337-L375】【app/views/mandat.py†L82-L126】【app/views/book.py†L137-L184】
 

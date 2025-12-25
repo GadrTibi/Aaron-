@@ -15,9 +15,9 @@ RESPONSES_URL = "https://api.openai.com/v1/responses"
 REQUEST_TIMEOUT = 30
 REQUIRED_FIELDS = {
     "quartier_intro",
-    "transports_metro_texte",
-    "transports_bus_texte",
-    "transports_taxi_texte",
+    "transport_metro_texte",
+    "transport_bus_texte",
+    "transport_taxi_texte",
 }
 
 
@@ -113,6 +113,16 @@ def _parse_response_payload(response: dict) -> Dict[str, Any]:
 
     if not isinstance(payload, dict):
         raise RuntimeError("Le LLM a répondu dans un format inattendu.")
+
+    # Compatibilité douce : accepter les anciennes clés puis les remapper vers le canonical
+    legacy_map = {
+        "transport_metro_texte": "transports_metro_texte",
+        "transport_bus_texte": "transports_bus_texte",
+        "transport_taxi_texte": "transports_taxi_texte",
+    }
+    for canonical, legacy in legacy_map.items():
+        if canonical not in payload and legacy in payload:
+            payload[canonical] = payload[legacy]
 
     missing = REQUIRED_FIELDS - set(payload.keys())
     if missing:

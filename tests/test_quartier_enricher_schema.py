@@ -11,9 +11,9 @@ def test_enrich_quartier_and_transports_returns_fields(monkeypatch):
         called["schema"] = schema
         return {
             "quartier_intro": "Quartier vivant et culturel.",
-            "transports_metro_texte": "Ligne 1 (Bastille) - 5min à pied",
-            "transports_bus_texte": "Bus 69 (Saint-Paul) - 3min",
-            "transports_taxi_texte": "Stations taxis à 2min",
+            "transport_metro_texte": "Ligne 1 (Bastille) - 5min à pied",
+            "transport_bus_texte": "Bus 69 (Saint-Paul) - 3min",
+            "transport_taxi_texte": "Stations taxis à 2min",
         }
 
     monkeypatch.setattr("app.services.quartier_enricher.invoke_llm_json", fake_invoke)
@@ -22,9 +22,8 @@ def test_enrich_quartier_and_transports_returns_fields(monkeypatch):
 
     assert set(result.keys()) == {
         "quartier_intro",
-        "transports_metro_texte",
-        "transports_bus_texte",
-        "transports_taxi_texte",
+        "transport_metro_texte",
+        "transport_bus_texte",
+        "transport_taxi_texte",
     }
-    assert "Bastille" in result["transports_metro_texte"]
-
+    assert "Bastille" in result["transport_metro_texte"]
