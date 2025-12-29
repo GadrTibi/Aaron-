@@ -14,6 +14,7 @@ from app.services.plots import build_estimation_histo
 from app.services.poi_facade import POIResult, get_pois
 from app.services.provider_status import get_provider_status
 from app.services.quartier_enricher import enrich_quartier_and_transports
+from app.services.quartier_sanitize import detect_transport_items
 from app.services.pptx_fill import generate_estimation_pptx
 from app.services.pptx_requirements import (
     get_estimation_detectors,
@@ -404,13 +405,18 @@ def render(config):
     col_q1, col_q2 = st.columns([1, 1])
     with col_q1:
         metro_txt = st.text_area(
-            "Transports métro (3-4 lignes, format: Ligne X — Station (min))",
+            "Transports métro (max 3 lignes)",
             key="transport_metro_texte",
         )
         bus_txt = st.text_area(
-            "Transports bus (3-4 lignes, format: Bus XX — Arrêt (min))",
+            "Transports bus (max 3 lignes)",
             key="transport_bus_texte",
         )
+        if sanitize_debug_toggle:
+            metro_detected = len(detect_transport_items(metro_txt, "metro"))
+            bus_detected = len(detect_transport_items(bus_txt, "bus"))
+            st.caption(f"Métro : lignes détectées: {metro_detected}, affichées: {min(metro_detected, 3)}")
+            st.caption(f"Bus : lignes détectées: {bus_detected}, affichées: {min(bus_detected, 3)}")
     with col_q2:
         taxi_txt = st.text_area(
             "Taxi (1-2 lignes, station si possible)",

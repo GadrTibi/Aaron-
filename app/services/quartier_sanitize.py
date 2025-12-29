@@ -37,29 +37,44 @@ def sanitize_intro(text: str, address: str) -> str:
     return truncate_clean(cleaned, limit=280)
 
 
-def sanitize_transport_lines(text: str, kind: str) -> str:
+def _split_transport_candidates(text: str):
+    for line in (text or "").splitlines():
+        chunk = line.strip()
+        if not chunk:
+            continue
+        for part in re.split(r"(?:\.\s+|;\s+)", chunk):
+            cleaned = part.strip(" .;")
+            if cleaned:
+                yield cleaned
+
+
+def detect_transport_items(text: str, kind: str) -> list[str]:
     patterns = {
         "metro": re.compile(r"^(Ligne\s+\w+|Ligne\s+\d+)\s+—"),
         "bus": re.compile(r"^(Bus\s+\d+)\s+—"),
         "taxi": re.compile(r"^(Station de taxis|Taxis:)"),
     }
-    max_lines = {"metro": 4, "bus": 4, "taxi": 2}
     regex = patterns.get(kind, re.compile(r".*"))
-    limit = max_lines.get(kind, 4)
+    items: list[str] = []
+    seen: set[str] = set()
+    for candidate in _split_transport_candidates(text):
+        if regex.match(candidate):
+            lowered = candidate.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            items.append(candidate)
+    return items
 
-    lines = []
-    for line in (text or "").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if regex.match(stripped):
-            lines.append(stripped)
-        if len(lines) >= limit:
-            break
 
-    if not lines:
+def sanitize_transport_lines(text: str, kind: str) -> str:
+    max_lines = {"metro": 3, "bus": 3, "taxi": 2}
+    limit = max_lines.get(kind, 3)
+    items = detect_transport_items(text, kind)
+    if not items:
         if kind == "taxi":
-            return "Taxis: G7/Uber disponibles (2–5 min)"
+            return truncate_clean("Taxis: G7/Uber disponibles (2–5 min)", limit=250)
         return ""
 
-    return truncate_clean("\n".join(lines), limit=250)
+    selected = items[:limit]
+    return truncate_clean("\n".join(selected), limit=250)
