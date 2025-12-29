@@ -371,6 +371,7 @@ def render(config):
         enrich_clicked = st.button("✨ Enrichir auto", disabled=not st.session_state.get("bien_addr", "").strip())
     with col_hint:
         st.caption("Saisissez l'adresse puis lancez l'enrichissement. Vous pouvez modifier manuellement si besoin.")
+    sanitize_debug_toggle = st.checkbox("Debug enrichissement quartier/transports", key="sanitize_debug_toggle")
 
     if enrich_clicked:
         perf_transports: dict[str, object] = {}
@@ -383,6 +384,7 @@ def render(config):
                 pass
             try:
                 payload = enrich_quartier_and_transports(addr_raw, report=run_report)
+                st.session_state["_quartier_sanitize_debug"] = getattr(run_report, "quartier_sanitize_debug", {})
                 st.session_state["_quartier_pending"] = {
                     "quartier_intro": payload.get("quartier_intro", st.session_state.get("quartier_intro", "")),
                     "transport_metro_texte": payload.get("transport_metro_texte", st.session_state.get("transport_metro_texte", "")),
@@ -397,27 +399,32 @@ def render(config):
                 else:
                     st.error(f"LLM indisponible: {exc}")
 
-    quartier_intro = st.text_area(
-        "Intro quartier (2-3 phrases)",
-        key="quartier_intro",
-    )
+    quartier_intro = st.text_area("Intro quartier (2-3 phrases)", key="quartier_intro")
     st.session_state["q_txt"] = quartier_intro
     col_q1, col_q2 = st.columns([1, 1])
     with col_q1:
         metro_txt = st.text_area(
-            "Transports métro (3-4 lignes)",
+            "Transports métro (3-4 lignes, format: Ligne X — Station (min))",
             key="transport_metro_texte",
         )
         bus_txt = st.text_area(
-            "Transports bus (3-4 lignes)",
+            "Transports bus (3-4 lignes, format: Bus XX — Arrêt (min))",
             key="transport_bus_texte",
         )
     with col_q2:
         taxi_txt = st.text_area(
-            "Transports taxi (1-2 lignes)",
+            "Taxi (1-2 lignes, station si possible)",
             key="transport_taxi_texte",
         )
         st.session_state["q_tx"] = taxi_txt
+    if sanitize_debug_toggle:
+        debug_data = st.session_state.get("_quartier_sanitize_debug") or {}
+        if debug_data:
+            with st.expander("Debug sanitize quartier/transports", expanded=False):
+                st.write("Avant sanitize")
+                st.json(debug_data.get("avant", {}))
+                st.write("Après sanitize")
+                st.json(debug_data.get("apres", {}))
 
     with st.expander("Ancienne méthode (debug)", expanded=False):
         perf_transports: dict[str, object] = {}
