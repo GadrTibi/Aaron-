@@ -7,8 +7,9 @@ from app.services.geo_helpers import ensure_geocoded
 from app.services.generation_report import GenerationReport
 from app.services.llm_client import invoke_llm_json
 from app.services.provider_status import resolve_api_key
-from app.services.quartier_sanitize import sanitize_intro, sanitize_transport_lines
+from app.services.quartier_sanitize import sanitize_intro
 from app.services.taxi_stands import build_taxi_lines_from_stands, find_nearby_taxi_stands
+from app.services.transports_compact import build_compact_transport_texts
 LEGACY_LLM_KEYS = {
     "transport_metro_texte": "transports_metro_texte",
     "transport_bus_texte": "transports_bus_texte",
@@ -47,11 +48,9 @@ def _build_prompt(address: str) -> str:
         "  quartier_intro (220-280 caractères) : format obligatoire \"Quartier <NOM_QUARTIER> (17e) — <ambiance/commerces>\".\n"
         "    Si le nom du quartier est inconnu, utiliser \"Dans le 17e arrondissement — <ambiance>\".\n"
         "    Ne pas commencer par l'adresse.\n"
-        "  transport_metro_texte (max 250 caractères) : liste 3-4 lignes, UNE par item, format exact \"Ligne X — Station Y (Z min à pied)\".\n"
-        "    Pas de texte ni commentaire après la liste.\n"
-        "  transport_bus_texte (max 250 caractères) : liste 3-4 lignes, UNE par item, format \"Bus XX — Arrêt Y (Z min)\".\n"
-        "  transport_taxi_texte (max 250 caractères) : 1-2 lignes max. Format \"Station de taxis <Nom> (X min à pied)\" ou\n"
-        "    fallback concret \"Taxis: G7/Uber disponibles dans le secteur (2–5 min en moyenne)\". Pas d'adjectifs vagues.\n"
+        "  transport_metro_texte : NE DOIT contenir que la liste des lignes (ex: \"2, 12\" ou \"2, 12, 3bis\"), sans station ni minutes.\n"
+        "  transport_bus_texte : NE DOIT contenir que la liste des lignes (ex: \"30, 40, 54, 95\"), sans arrêt ni minutes.\n"
+        "  transport_taxi_texte : doit être exactement \"Stations de taxi\" (ou vide si inconnue, l'app gère le fallback).\n"
         "Réponds en JSON avec ce format exact et uniquement en JSON."
     ).format(address=address)
 
@@ -84,14 +83,25 @@ def enrich_quartier_and_transports(address: str, report: Optional[GenerationRepo
     before_sanitize = dict(validated)
     if taxi_override:
         validated["transport_taxi_texte"] = taxi_override
+    compact_transports = build_compact_transport_texts(
+        validated.get("transport_metro_texte", ""),
+        validated.get("transport_bus_texte", ""),
+        validated.get("transport_taxi_texte", ""),
+    )
     sanitized = {
         "quartier_intro": sanitize_intro(validated.get("quartier_intro", ""), addr),
-        "transport_metro_texte": sanitize_transport_lines(validated.get("transport_metro_texte", ""), "metro"),
-        "transport_bus_texte": sanitize_transport_lines(validated.get("transport_bus_texte", ""), "bus"),
-        "transport_taxi_texte": sanitize_transport_lines(validated.get("transport_taxi_texte", ""), "taxi"),
+        "transport_metro_texte": compact_transports["transport_metro_texte"],
+        "transport_bus_texte": compact_transports["transport_bus_texte"],
+        "transport_taxi_texte": compact_transports["transport_taxi_texte"],
     }
     if report is not None:
         report.quartier_sanitize_debug = {"avant": before_sanitize, "apres": sanitized}
+        if (
+            sanitized["transport_metro_texte"] != validated.get("transport_metro_texte")
+            or sanitized["transport_bus_texte"] != validated.get("transport_bus_texte")
+            or sanitized["transport_taxi_texte"] != validated.get("transport_taxi_texte")
+        ):
+            report.add_note("Transports reformattés au format compact (lignes).")
     return sanitized
 
 

@@ -26,6 +26,7 @@ from app.services.template_tokens import (
 )
 from app.services.template_catalog import TemplateItem, list_effective_templates
 from app.services import template_roots
+from app.services.transports_compact import build_compact_transport_texts
 from app.services.transports_facade import get_transports
 from app.services.revenue import RevenueInputs, compute_revenue
 from app.services.template_validation import validate_pptx_template
@@ -359,6 +360,8 @@ def render(config):
     migrate_quartier_transport_session(st.session_state)
     for key in QUARTIER_TRANSPORT_SESSION_KEYS:
         st.session_state.setdefault(key, "")
+    if not st.session_state.get("transport_taxi_texte"):
+        st.session_state["transport_taxi_texte"] = "Stations de taxi"
 
     apply_pending_fields(
         st.session_state,
@@ -404,19 +407,23 @@ def render(config):
     col_q1, col_q2 = st.columns([1, 1])
     with col_q1:
         metro_txt = st.text_area(
-            "Transports métro (3-4 lignes, format: Ligne X — Station (min))",
+            "Transports métro (lignes uniquement)",
             key="transport_metro_texte",
+            placeholder="Ex: 2, 12, 3bis",
         )
         bus_txt = st.text_area(
-            "Transports bus (3-4 lignes, format: Bus XX — Arrêt (min))",
+            "Transports bus (lignes uniquement)",
             key="transport_bus_texte",
+            placeholder="Ex: 30, 40, 54, 95",
         )
     with col_q2:
         taxi_txt = st.text_area(
-            "Taxi (1-2 lignes, station si possible)",
+            "Taxi (stations proches)",
             key="transport_taxi_texte",
+            placeholder="Stations de taxi",
         )
         st.session_state["q_tx"] = taxi_txt
+    st.caption("Le rendu final sera compact: Métro, ligne 2, 12 / Bus, ligne 30, 40, 54, 95")
     if sanitize_debug_toggle:
         debug_data = st.session_state.get("_quartier_sanitize_debug") or {}
         if debug_data:
@@ -853,11 +860,19 @@ def render(config):
         elif not histo_error:
             st.caption("Graphique non généré pour le moment.")
 
+    transports_compact = build_compact_transport_texts(
+        st.session_state.get("transport_metro_texte", ""),
+        st.session_state.get("transport_bus_texte", ""),
+        st.session_state.get("transport_taxi_texte", ""),
+    )
+    transport_state_for_mapping = dict(st.session_state)
+    transport_state_for_mapping.update(transports_compact)
+
     # Mapping Estimation
     mapping = {
         # Slide 4
         "[[ADRESSE]]": st.session_state.get("bien_addr",""),
-        **build_quartier_transport_tokens_mapping(st.session_state),
+        **build_quartier_transport_tokens_mapping(transport_state_for_mapping),
         "[[INCONTOURNABLE_1_NOM]]": st.session_state.get('i1', ''),
         "[[INCONTOURNABLE_2_NOM]]": st.session_state.get('i2', ''),
         "[[INCONTOURNABLE_3_NOM]]": st.session_state.get('i3', ''),

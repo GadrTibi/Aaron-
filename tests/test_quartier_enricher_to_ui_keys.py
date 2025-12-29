@@ -17,6 +17,6 @@ def test_enrich_quartier_maps_to_ui_keys(monkeypatch):
     result = enrich_quartier_and_transports("10 rue de test")
 
     assert result["quartier_intro"].startswith("Quartier Monceau")
-    assert result["transport_metro_texte"].startswith("Ligne 2 — Station Monceau")
-    assert result["transport_bus_texte"].startswith("Bus 30 — Arrêt Monceau")
-    assert result["transport_taxi_texte"].startswith("Station de taxis Monceau")
+    assert result["transport_metro_texte"] == "Métro, ligne 2"
+    assert result["transport_bus_texte"] == "Bus, ligne 30"
+    assert result["transport_taxi_texte"] == "Stations de taxi"

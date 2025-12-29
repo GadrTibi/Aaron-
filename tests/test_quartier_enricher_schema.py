@@ -26,4 +26,6 @@ def test_enrich_quartier_and_transports_returns_fields(monkeypatch):
         "transport_bus_texte",
         "transport_taxi_texte",
     }
-    assert "Bastille" in result["transport_metro_texte"]
+    assert result["transport_metro_texte"] == "Métro, ligne 1, 3"
+    assert result["transport_bus_texte"] == "Bus, ligne 69, 94"
+    assert result["transport_taxi_texte"] == "Stations de taxi"
