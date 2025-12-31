@@ -3,13 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, Set
 
-from docx import Document
 from pptx import Presentation
 
 from app.services.token_utils import (
-    DOCX_TOKEN_PATTERN,
     PPTX_TOKEN_PATTERN,
-    extract_docx_tokens_from_document,
+    extract_docx_tokens,
     extract_pptx_tokens_from_presentation,
     extract_shape_names,
 )
@@ -30,11 +28,6 @@ def _severity(missing_shapes: Iterable[str], unknown_tokens: Iterable[str]) -> s
     if list(unknown_tokens):
         return "WARN"
     return "OK"
-
-
-def extract_docx_tokens(template_path: str) -> set[str]:
-    doc = Document(template_path)
-    return extract_docx_tokens_from_document(doc)
 
 
 def extract_pptx_tokens(template_path: str) -> set[str]:

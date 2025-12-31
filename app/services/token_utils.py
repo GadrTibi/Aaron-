@@ -30,6 +30,18 @@ def extract_docx_tokens_from_document(doc: Document) -> set[str]:
     return tokens
 
 
+def extract_docx_tokens(template_path: str) -> set[str]:
+    """Retourne les tokens DOCX présents dans un fichier.
+
+    Les tokens peuvent être fragmentés sur plusieurs *runs* Word ; la
+    concaténation des runs de chaque paragraphe permet de les détecter
+    correctement.
+    """
+
+    doc = Document(template_path)
+    return extract_docx_tokens_from_document(doc)
+
+
 def walk_pptx_shapes(shapes) -> Iterator[object]:
     """Yield all shapes recursively, diving into groups if present."""
 

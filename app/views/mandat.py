@@ -10,8 +10,9 @@ from app.services.mandat_tokens import build_mandat_mapping
 from app.services.docx_fill import generate_docx_from_template
 from app.services.template_catalog import TemplateItem, list_effective_templates
 from app.services import template_roots
-from app.services.template_validation import validate_docx_template
-from .utils import _sanitize_filename, render_generation_report, render_template_validation
+from app.services.token_utils import extract_docx_tokens
+from app.services.token_audit import audit_template_tokens
+from .utils import _sanitize_filename, render_generation_report
 
 
 def render(config):
@@ -164,17 +165,45 @@ def render(config):
         st.text_input("Email", key="owner_email")
 
     mapping = build_mandat_mapping(st.session_state, st.session_state.get("mandat_signature_date"))
-    strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
+    strict_default = bool(os.environ.get("MFY_STRICT_GENERATION"))
+    strict_mode = st.checkbox(
+        "Mode strict (bloquer si tokens manquants)",
+        value=st.session_state.get("mandat_strict_mode", strict_default),
+        key="mandat_strict_mode",
+    )
     tpl_path = selected_template.path if selected_template else None
-    validation_result = None
+
+    template_tokens: set[str] = set()
+    token_audit: dict | None = None
     if tpl_path and os.path.exists(tpl_path):
         try:
-            validation_result = validate_docx_template(tpl_path, set(mapping.keys()))
+            template_tokens = extract_docx_tokens(tpl_path)
+            token_audit = audit_template_tokens(template_tokens, mapping)
         except Exception as exc:
             st.warning(f"Validation du template Mandat impossible: {exc}")
-    render_template_validation(validation_result, strict=strict_mode)
 
-    disable_generate = strict_mode and validation_result is not None and validation_result.severity == "KO"
+    with st.expander("Validation du template (DOCX)", expanded=bool(template_tokens)):
+        st.write(f"Tokens détectés dans le template : {len(template_tokens)}")
+        if template_tokens:
+            st.code(", ".join(sorted(template_tokens)))
+        if token_audit:
+            st.write(f"✅ Tokens OK : {len(token_audit['ok'])}")
+            if token_audit["empty_values"]:
+                st.warning(f"⚠️ Valeurs vides ({len(token_audit['empty_values'])}) : {', '.join(token_audit['empty_values'])}")
+            else:
+                st.caption("⚠️ Valeurs vides : aucune")
+            if token_audit["missing_in_mapping"]:
+                st.error(f"❌ Tokens non supportés ({len(token_audit['missing_in_mapping'])}) : {', '.join(token_audit['missing_in_mapping'])}")
+            else:
+                st.caption("❌ Tokens non supportés : aucun")
+        elif tpl_path:
+            st.caption("Impossible d'auditer ce template.")
+        else:
+            st.caption("Aucun template sélectionné.")
+
+    disable_generate = strict_mode and token_audit is not None and (
+        bool(token_audit["missing_in_mapping"]) or bool(token_audit["empty_values"])
+    )
     if st.button("Générer le DOCX (Mandat)", disabled=disable_generate):
         tpl_path = selected_template.path if selected_template else None
         if not tpl_path or not os.path.exists(tpl_path):
@@ -182,17 +211,15 @@ def render(config):
                 "Aucun template DOCX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus."
             )
             st.stop()
+        if strict_mode and token_audit and (token_audit["missing_in_mapping"] or token_audit["empty_values"]):
+            st.error("Mode strict : génération bloquée. Corrigez les tokens manquants ou les valeurs vides.")
+            st.stop()
         out_path = os.path.join(
             OUT_DIR, f"Mandat - {st.session_state.get('bien_addr','bien')}.docx"
         )
         report = generate_docx_from_template(tpl_path, out_path, mapping, strict=strict_mode)
-        if validation_result and validation_result.notes:
-            for note in validation_result.notes:
-                report.add_note(note)
         report.merge(run_report)
-        if strict_mode and validation_result and validation_result.severity == "KO":
-            st.error("Génération bloquée : le template n'est pas valide en mode strict.")
-        elif strict_mode and not report.ok:
+        if strict_mode and not report.ok:
             st.error("Génération interrompue : le rapport signale des éléments bloquants.")
         else:
             st.success(f"OK : {out_path}")

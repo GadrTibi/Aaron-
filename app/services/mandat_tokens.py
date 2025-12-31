@@ -116,11 +116,11 @@ def build_mandat_mapping(ss: dict, signature_date: Optional[date] = None) -> dic
         "«Remise_de_pièces»": remise_pj,
 
         # Bas de page – Date de signature du mandat
+        "«MANDAT_DATE_SIGNATURE»": mois_annee_str,
+        "«MANDAT_JOUR_SIGNATURE»": jour_str,
         "MANDAT_JOUR_SIGNATURE": jour_str,
         "MANDAT_DATE_SIGNATURE": mois_annee_str,
         "MANDAT_DATE_SIGNATURE_FULL": date_full_str,
-        "«MANDAT_DATE_SIGNATURE»": mois_annee_str,
-        "«MANDAT_JOUR_SIGNATURE»": jour_str,
     }
     # Tests manuels recommandés :
     # 1. Ouvrir la page Mandat, renseigner les champs et choisir une date de signature.
