@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Optional
 
 
 def _bool_oui_non(v) -> str:
@@ -11,7 +12,7 @@ def _bool_oui_non(v) -> str:
     return "Oui" if bool(v) else "Non"
 
 
-def build_mandat_mapping(ss: dict) -> dict:
+def build_mandat_mapping(ss: dict, signature_date: Optional[date] = None) -> dict:
     """Construit le mapping {token_docx: valeur} pour le mandat.
 
     Les valeurs priorisent ``ss[...]`` provenant des Données générales et
@@ -46,12 +47,27 @@ def build_mandat_mapping(ss: dict) -> dict:
     remise_pj = ss.get("mandat_remise_pieces", "")
 
     # Date de signature du mandat : fallback sur aujourd'hui pour éviter les tokens non remplacés
-    sig_date = ss.get("mandat_signature_date") or date.today()
+    sig_date = signature_date or ss.get("mandat_signature_date") or date.today()
     if not isinstance(sig_date, date):
         sig_date = date.today()
-    jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-    date_signature_str = ss.get("mandat_date_signature_str") or sig_date.strftime("%d/%m/%Y")
-    jour_signature_str = ss.get("mandat_jour_signature_str") or jours[sig_date.weekday()]
+
+    jour_str = str(sig_date.day)
+    mois_fr = [
+        "janvier",
+        "février",
+        "mars",
+        "avril",
+        "mai",
+        "juin",
+        "juillet",
+        "août",
+        "septembre",
+        "octobre",
+        "novembre",
+        "décembre",
+    ]
+    mois_annee_str = f"{mois_fr[sig_date.month - 1]} {sig_date.year}"
+    date_full_str = f"{jour_str} {mois_annee_str}"
 
     # Normalisations chiffre → str
     def fmt_int(v):
@@ -100,12 +116,15 @@ def build_mandat_mapping(ss: dict) -> dict:
         "«Remise_de_pièces»": remise_pj,
 
         # Bas de page – Date de signature du mandat
-        "«MANDAT_DATE_SIGNATURE»": date_signature_str,
-        "«MANDAT_JOUR_SIGNATURE»": jour_signature_str,
+        "MANDAT_JOUR_SIGNATURE": jour_str,
+        "MANDAT_DATE_SIGNATURE": mois_annee_str,
+        "MANDAT_DATE_SIGNATURE_FULL": date_full_str,
+        "«MANDAT_DATE_SIGNATURE»": mois_annee_str,
+        "«MANDAT_JOUR_SIGNATURE»": jour_str,
     }
     # Tests manuels recommandés :
     # 1. Ouvrir la page Mandat, renseigner les champs et choisir une date de signature.
     # 2. Générer le DOCX Mandat puis l'ouvrir.
     # 3. Vérifier que «MANDAT_JOUR_SIGNATURE» et «MANDAT_DATE_SIGNATURE» sont remplacés
-    #    (ex. «Fait à Paris, le Lundi 12/05/2025»), et que les autres tokens restent fonctionnels.
+    #    (ex. «Fait à Paris, le 12 mai 2025»), et que les autres tokens restent fonctionnels.
     return mapping

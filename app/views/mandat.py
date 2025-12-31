@@ -5,6 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 from app.services.generation_report import GenerationReport
+from app.services.mandat_templates import filter_mandat_templates
 from app.services.mandat_tokens import build_mandat_mapping
 from app.services.docx_fill import generate_docx_from_template
 from app.services.template_catalog import TemplateItem, list_effective_templates
@@ -24,9 +25,15 @@ def render(config):
     st.caption(f"Templates serveur (Git) : {template_roots.MANDAT_TPL_DIR}")
 
     def _select_template(kind: str, select_key: str) -> TemplateItem | None:
+        mandat_type = st.session_state.get("mandat_type", "Courte durée (CD)")
         effective = list_effective_templates(kind)
-        repo_items = [tpl for tpl in effective if tpl.source == "repo"]
-        legacy_items = [tpl for tpl in effective if tpl.source != "repo"]
+        filtered = filter_mandat_templates(effective, mandat_type)
+        if not filtered and effective:
+            st.warning("Aucun template filtré trouvé, affichage complet")
+            filtered = effective
+        options = filtered or effective
+        repo_items = [tpl for tpl in options if tpl.source == "repo"]
+        legacy_items = [tpl for tpl in options if tpl.source != "repo"]
         selected: TemplateItem | None = None
 
         if repo_items:
@@ -36,15 +43,15 @@ def render(config):
                 key=f"{select_key}_repo",
             )
             selected = next((tpl for tpl in repo_items if tpl.label == label), None)
+        elif legacy_items:
+            label = st.selectbox(
+                "Templates hérités (MFY_* ou dossiers locaux)",
+                options=[tpl.label for tpl in legacy_items],
+                key=f"{select_key}_legacy",
+            )
+            selected = next((tpl for tpl in legacy_items if tpl.label == label), None)
         else:
             st.warning("Aucun template trouvé dans templates/mandat. Ajoutez-en via Git.")
-            if legacy_items:
-                label = st.selectbox(
-                    "Templates hérités (MFY_* ou dossiers locaux)",
-                    options=[tpl.label for tpl in legacy_items],
-                    key=f"{select_key}_legacy",
-                )
-                selected = next((tpl for tpl in legacy_items if tpl.label == label), None)
         return selected
 
     selected_template = _select_template("mandat", select_key="mandat_tpl")
@@ -102,6 +109,17 @@ def render(config):
     # ---- UI Mandat sans redondance ----
     st.subheader("Mandat (DOCX)")
 
+    st.radio(
+        "Type de mandat",
+        options=["Courte durée (CD)", "Moyenne durée (MD - Bail mobilité)"],
+        key="mandat_type",
+    )
+    st.date_input(
+        "Date de signature",
+        key="mandat_signature_date",
+        value=st.session_state.get("mandat_signature_date", date.today()),
+    )
+
     st.caption(f"Adresse bien : {st.session_state.get('bien_addr','')}")
     st.caption(
         f"Surface : {st.session_state.get('bien_surface','')} m² • Pièces : {st.session_state.get('bien_pieces','')} • SDB : {st.session_state.get('bien_sdb','')} • Couchages : {st.session_state.get('bien_couchages','')}"
@@ -132,20 +150,6 @@ def render(config):
     with colB:
         st.date_input("Date de début de mandat", key="mandat_date_debut")
 
-        # Date de signature : par défaut aujourd'hui, stockée dans le session_state + formats prêts pour le DOCX
-        default_sig_date = st.session_state.get("mandat_signature_date", date.today()) or date.today()
-        sig_date = st.date_input(
-            "Date de signature du mandat",
-            key="mandat_signature_date",
-            value=default_sig_date,
-        )
-        if not sig_date:
-            sig_date = date.today()
-            st.session_state["mandat_signature_date"] = sig_date
-        jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-        st.session_state["mandat_jour_signature_str"] = jours[sig_date.weekday()]
-        st.session_state["mandat_date_signature_str"] = sig_date.strftime("%d/%m/%Y")
-
     st.text_area("Destination du bien (texte)", key="mandat_destination_bien")
     st.text_area("Remise de pièces (liste/texte)", key="mandat_remise_pieces")
 
@@ -159,7 +163,7 @@ def render(config):
         st.text_input("Ville", key="owner_ville")
         st.text_input("Email", key="owner_email")
 
-    mapping = build_mandat_mapping(st.session_state)
+    mapping = build_mandat_mapping(st.session_state, st.session_state.get("mandat_signature_date"))
     strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
     tpl_path = selected_template.path if selected_template else None
     validation_result = None
