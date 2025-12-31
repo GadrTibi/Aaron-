@@ -28,7 +28,7 @@ from app.services.template_catalog import TemplateItem, list_effective_templates
 from app.services import template_roots
 from app.services.transports_compact import build_compact_transport_texts
 from app.services.transports_facade import get_transports
-from app.services.revenue import RevenueInputs, compute_revenue
+from app.services.revenue import RevenueInputs, build_revenue_token_mapping, compute_revenue
 from app.services.template_validation import validate_pptx_template
 from services.image_uploads import save_uploaded_image
 from services.wiki_images import ImageCandidate, WikiImageService
@@ -781,15 +781,29 @@ def render(config):
 
     # ---- Revenus + scénarios ----
     st.subheader("Paramètres revenus")
-    colA, colB, colC, colD = st.columns(4)
+    default_platform_fee = float(st.session_state.get("platform_fee_pct", 15.0))
+    default_mfy_commission = float(st.session_state.get("mfy_commission_pct", st.session_state.get("rn_comm", 20.0)))
+    default_cleaning_fee = float(st.session_state.get("cleaning_fee_eur", st.session_state.get("rn_menage", 0.0)))
+
+    colA, colB, colC, colD, colE = st.columns(5)
     with colA:
         prix_nuitee = st.number_input("Prix par nuitée (€)", min_value=0.0, value=120.0, step=5.0, key="rn_prix")
     with colB:
         taux_occupation = st.slider("Taux d'occupation (%)", min_value=0, max_value=100, value=70, step=1, key="rn_occ")
     with colC:
-        commission_mfy = st.slider("Commission MFY (%)", min_value=0, max_value=50, value=20, step=1, key="rn_comm")
+        platform_fee_pct = st.number_input(
+            "Frais plateforme (%)", min_value=0.0, max_value=100.0, value=default_platform_fee, step=1.0, key="platform_fee_pct"
+        )
     with colD:
-        frais_menage = st.number_input("Frais de ménage (mensuels, €)", min_value=0.0, value=0.0, step=5.0, key="rn_menage")
+        mfy_commission_pct = st.slider(
+            "Commission MFY (%)", min_value=0.0, max_value=50.0, value=float(default_mfy_commission), step=1.0, key="mfy_commission_pct"
+        )
+    with colE:
+        cleaning_fee_eur = st.number_input(
+            "Frais de ménage (mensuels, €)", min_value=0.0, value=default_cleaning_fee, step=5.0, key="cleaning_fee_eur"
+        )
+        st.session_state["rn_menage"] = cleaning_fee_eur
+    st.session_state["rn_comm"] = float(mfy_commission_pct)
 
     st.markdown("**Scénarios de prix (nuitée)**")
     c1, c2, c3 = st.columns(3)
@@ -803,20 +817,41 @@ def render(config):
     calc = compute_revenue(RevenueInputs(
         prix_nuitee=float(prix_nuitee),
         taux_occupation_pct=float(taux_occupation),
-        commission_pct=float(commission_mfy),
-        frais_menage_mensuels=float(frais_menage),
+        platform_fee_pct=float(platform_fee_pct),
+        mfy_commission_pct=float(mfy_commission_pct),
+        frais_menage_mensuels=float(cleaning_fee_eur),
     ))
 
     REV_BRUT = calc["revenu_brut"]
     FRAIS_GEN = calc["frais_generaux"]
-    REV_NET  = calc["revenu_net"]
+    REV_NET = calc["revenu_net"]
     JOURS_OCC = calc["jours_occupes"]
+    PLATFORM_FEE_PCT = calc["platform_fee_pct"]
+    PLATFORM_FEE_EUR = calc["platform_fee_eur"]
+    BASE_COMMISSION = calc["base_commission"]
+    MFY_COMMISSION_PCT = calc["mfy_commission_pct"]
+    MFY_COMMISSION_EUR = calc["mfy_commission_eur"]
+    CLEANING_FEE_EUR = calc["cleaning_fee_eur"]
+
+    revenue_mapping = build_revenue_token_mapping(calc)
 
     st.metric("Jours loués / mois", f"{JOURS_OCC:.1f} j")
     colX, colY, colZ = st.columns(3)
     colX.metric("Revenu brut", f"{REV_BRUT:.0f} €")
     colY.metric("Frais généraux", f"{FRAIS_GEN:.0f} €")
     colZ.metric("Revenu net", f"{REV_NET:.0f} €")
+
+    with st.expander("Debug revenus / mapping", expanded=False):
+        st.write({
+            "revenu_brut": REV_BRUT,
+            "platform_fee_pct": PLATFORM_FEE_PCT,
+            "platform_fee_eur": PLATFORM_FEE_EUR,
+            "base_commission": BASE_COMMISSION,
+            "mfy_commission_pct": MFY_COMMISSION_PCT,
+            "mfy_commission_eur": MFY_COMMISSION_EUR,
+            "cleaning_fee_eur": CLEANING_FEE_EUR,
+        })
+        st.json(revenue_mapping)
 
     # Scénarios prix
     PRIX_PESS = prix_nuitee * coef_pess
@@ -895,14 +930,11 @@ def render(config):
         # Slide 6
         "[[PRIX_NUIT]]": f"{st.session_state.get('rn_prix',0):.0f} €",
         "[[TAUX_OCC]]": f"{st.session_state.get('rn_occ',0)} %",
-        "[[REV_BRUT]]": f"{REV_BRUT:.0f} €",
-        "[[FRAIS_GEN]]": f"{FRAIS_GEN:.0f} €",
-        "[[REV_NET]]": f"{REV_NET:.0f} €",
-        "[[JOURS_OCC]]": f"{JOURS_OCC:.1f} j",
         "[[PRIX_PESSIMISTE]]": f"{PRIX_PESS:.0f} €",
         "[[PRIX_CIBLE]]": f"{PRIX_CIBLE:.0f} €",
         "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",
     }
+    mapping.update(revenue_mapping)
 
     # Images for VISITE_1/2 (from confirmed paths or uploaded files)
     image_by_shape = {}
