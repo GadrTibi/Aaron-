@@ -13,6 +13,8 @@ def _repo_root() -> Path:
 REPO_TPL_ROOT = _repo_root() / "templates"
 REPO_TEMPLATE_ROOT = REPO_TPL_ROOT  # Compat
 ESTIMATION_TPL_DIR = REPO_TPL_ROOT / "estimation"
+ESTIMATION_CD_TPL_DIR = ESTIMATION_TPL_DIR / "cd"
+ESTIMATION_MD_TPL_DIR = ESTIMATION_TPL_DIR / "md"
 MANDAT_TPL_DIR = REPO_TPL_ROOT / "mandat"
 MANDAT_CD_TPL_DIR = MANDAT_TPL_DIR / "cd"
 MANDAT_MD_TPL_DIR = MANDAT_TPL_DIR / "md"
@@ -43,4 +45,20 @@ def list_legacy_mandat_templates() -> list[Path]:
     if not MANDAT_TPL_DIR.exists() or not MANDAT_TPL_DIR.is_dir():
         return []
     files = [p for p in MANDAT_TPL_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".docx"]
+    return sorted(files, key=lambda p: p.name.lower())
+
+
+def get_estimation_templates_dir(estimation_type: str) -> Path:
+    estimation_key = (estimation_type or "").strip().upper()
+    if estimation_key == "MD":
+        return ESTIMATION_MD_TPL_DIR
+    return ESTIMATION_CD_TPL_DIR
+
+
+def list_estimation_templates(estimation_type: str) -> list[Path]:
+    target_dir = get_estimation_templates_dir(estimation_type)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if not target_dir.exists() or not target_dir.is_dir():
+        return []
+    files = [p for p in target_dir.iterdir() if p.is_file() and p.suffix.lower() == ".pptx"]
     return sorted(files, key=lambda p: p.name.lower())

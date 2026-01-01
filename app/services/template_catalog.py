@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.services import template_roots
+from app.services.template_roots import list_estimation_templates
 
 TemplateSource = Literal["repo", "env"]
 
@@ -69,6 +70,10 @@ def list_repo_templates(kind: str) -> list[Path]:
     ext = _KIND_EXT.get(kind)
     if not ext:
         raise ValueError(f"Type de template inconnu: {kind}")
+    if kind == "estimation":
+        # Compat: retourne l'union CD/MD si appelé sans distinction de type.
+        paths = list_estimation_templates("CD") + list_estimation_templates("MD")
+        return sorted(paths, key=lambda p: p.name.lower())
     repo_dir = _kind_dir(kind)
     return _list_dir(repo_dir, ext)
 
@@ -86,6 +91,12 @@ def list_repo_mandat_templates(mandat_type: str) -> list[TemplateItem]:
 
     legacy_repo_templates = template_roots.list_legacy_mandat_templates()
     return _to_items(legacy_repo_templates, "repo")
+
+
+def list_repo_estimation_templates(estimation_type: str) -> list[TemplateItem]:
+    """Liste les templates estimation dans le repo selon le type (CD/MD)."""
+
+    return _to_items(list_estimation_templates(estimation_type), "repo")
 
 
 def list_env_templates(kind: str) -> list[TemplateItem]:
@@ -113,6 +124,34 @@ def list_effective_mandat_templates(mandat_type: str) -> list[TemplateItem]:
     if repo_items:
         return repo_items
     return list_env_templates("mandat")
+
+
+def _iter_estimation_env_dirs(estimation_type: str) -> list[Path]:
+    subdir = "cd" if (estimation_type or "").strip().upper() == "CD" else "md"
+    candidates: list[Path] = []
+    for legacy_dir in _iter_env_dirs("estimation"):
+        candidates.append(legacy_dir / subdir)
+        candidates.append(legacy_dir / "estimation" / subdir)
+        candidates.append(legacy_dir)
+    return candidates
+
+
+def list_env_estimation_templates(estimation_type: str) -> list[TemplateItem]:
+    ext = _KIND_EXT.get("estimation")
+    for env_dir in _iter_estimation_env_dirs(estimation_type):
+        env_templates = _list_dir(env_dir, ext)
+        if env_templates:
+            return _to_items(env_templates, "env")
+    return []
+
+
+def list_effective_estimation_templates(estimation_type: str) -> list[TemplateItem]:
+    """Priorise les templates Estimation du repo par type (CD/MD), sinon env."""
+
+    repo_items = list_repo_estimation_templates(estimation_type)
+    if repo_items:
+        return repo_items
+    return list_env_estimation_templates(estimation_type)
 
 
 def list_effective_templates(kind: str) -> list[TemplateItem]:

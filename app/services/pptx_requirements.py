@@ -23,7 +23,10 @@ BOOK_REQUIRED_SHAPES = {
 }
 
 
-def get_estimation_requirements() -> Set[str]:
+def get_estimation_requirements(estimation_type: str | None = None) -> Set[str]:
+    estimation_key = (estimation_type or "").strip().upper()
+    if estimation_key == "MD":
+        return {name for name in ESTIMATION_REQUIRED_SHAPES if name != "ESTIMATION_HISTO_MASK"}
     return set(ESTIMATION_REQUIRED_SHAPES)
 
 
@@ -40,10 +43,10 @@ def _is_estimation_histo_mask(name: str) -> bool:
     return "histo" in norm and norm.endswith("mask")
 
 
-def get_estimation_detectors() -> Dict[str, Callable[[Set[str]], bool]]:
-    return {
-        "ESTIMATION_HISTO_MASK": lambda names: any(_is_estimation_histo_mask(n) for n in names),
-    }
+def get_estimation_detectors(estimation_type: str | None = None) -> Dict[str, Callable[[Set[str]], bool]]:
+    if (estimation_type or "").strip().upper() == "MD":
+        return {}
+    return {"ESTIMATION_HISTO_MASK": lambda names: any(_is_estimation_histo_mask(n) for n in names)}
 
 
 def get_book_detectors() -> Dict[str, Callable[[Set[str]], bool]]:

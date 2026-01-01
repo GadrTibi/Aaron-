@@ -2,6 +2,10 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
+ESTIMATION_DAYS_PER_MONTH_CD = 25.5
+ESTIMATION_DAYS_PER_MONTH_MD = 26.0
+
+
 @dataclass
 class RevenueInputs:
     prix_nuitee: float
@@ -21,8 +25,8 @@ def _format_pct(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
-def compute_revenue(inp: RevenueInputs):
-    jours_occupes = 30.0 * (inp.taux_occupation_pct / 100.0)
+def compute_revenue(inp: RevenueInputs, *, days_per_month: float = 30.0):
+    jours_occupes = float(days_per_month) * (inp.taux_occupation_pct / 100.0)
     revenu_brut = inp.prix_nuitee * jours_occupes
 
     platform_fee_eur = revenu_brut * (inp.platform_fee_pct / 100.0)

@@ -24,11 +24,18 @@ from app.services.template_tokens import (
     build_quartier_transport_tokens_mapping,
     migrate_quartier_transport_session,
 )
-from app.services.template_catalog import TemplateItem, list_effective_templates
+from app.services.template_catalog import TemplateItem, list_effective_estimation_templates
 from app.services import template_roots
 from app.services.transports_compact import build_compact_transport_texts
 from app.services.transports_facade import get_transports
-from app.services.revenue import RevenueInputs, build_revenue_token_mapping, compute_revenue
+from app.services.revenue import (
+    ESTIMATION_DAYS_PER_MONTH_CD,
+    ESTIMATION_DAYS_PER_MONTH_MD,
+    RevenueInputs,
+    build_revenue_token_mapping,
+    compute_revenue,
+)
+from app.services.template_catalog import list_effective_estimation_templates
 from app.services.template_validation import validate_pptx_template
 from services.image_uploads import save_uploaded_image
 from services.wiki_images import ImageCandidate, WikiImageService
@@ -42,6 +49,26 @@ from .utils import (
 
 
 DEFAULT_RADIUS_M = 300
+
+
+def normalize_estimation_type(label: str) -> str:
+    if "MD" in (label or "").upper():
+        return "MD"
+    return "CD"
+
+
+def should_generate_estimation_histo(estimation_type: str) -> bool:
+    return normalize_estimation_type(estimation_type) == "CD"
+
+
+def generate_estimation_histo_if_needed(
+    estimation_type: str,
+    base_price_value: float,
+    build_func=build_estimation_histo,
+):
+    if not should_generate_estimation_histo(estimation_type):
+        return None
+    return build_func(base_price_value)
 
 
 def _restore_candidates(key: str) -> list[ImageCandidate]:
@@ -158,6 +185,14 @@ def render(config):
     OUT_DIR = config['OUT_DIR']
     run_report = GenerationReport()
 
+    estimation_choice = st.radio(
+        "Type d'estimation",
+        ["Courte durée (CD)", "Moyenne durée (MD)"],
+        key="estimation_type_ui",
+    )
+    estimation_type = normalize_estimation_type(estimation_choice)
+    st.session_state["estimation_type"] = estimation_type
+
     # ---------- APPLY PENDING PREFILL BEFORE WIDGETS ----------
     if "__prefill" in st.session_state and isinstance(st.session_state["__prefill"], dict):
         # apply and pop so we don't loop
@@ -167,33 +202,30 @@ def render(config):
 
     # ---- Templates Estimation (PPTX) ----
     st.subheader("Templates Estimation (PPTX)")
-    st.caption(f"Templates serveur (Git) : {template_roots.ESTIMATION_TPL_DIR}")
+    st.caption(f"Templates: Git / estimation/{estimation_type.lower()}")
 
-    def _select_template(kind: str, *, select_key: str) -> TemplateItem | None:
-        effective = list_effective_templates(kind)
-        repo_items = [tpl for tpl in effective if tpl.source == "repo"]
-        legacy_items = [tpl for tpl in effective if tpl.source != "repo"]
-        selected: TemplateItem | None = None
+    templates = list_effective_estimation_templates(estimation_type)
+    selected_template: TemplateItem | None = None
 
-        if repo_items:
+    repo_templates = [tpl for tpl in templates if tpl.source == "repo"]
+    legacy_templates = [tpl for tpl in templates if tpl.source != "repo"]
+
+    if repo_templates:
+        label = st.selectbox(
+            "Templates serveur (Git)",
+            options=[tpl.label for tpl in repo_templates],
+            key="estimation_tpl_repo",
+        )
+        selected_template = next((tpl for tpl in repo_templates if tpl.label == label), None)
+    else:
+        st.warning(f"Aucun template trouvé dans templates/estimation/{estimation_type.lower()}. Ajoutez-en via Git.")
+        if legacy_templates:
             label = st.selectbox(
-                "Templates serveur (Git)",
-                options=[tpl.label for tpl in repo_items],
-                key=f"{select_key}_repo",
+                "Templates hérités (MFY_* ou dossiers locaux)",
+                options=[tpl.label for tpl in legacy_templates],
+                key="estimation_tpl_legacy",
             )
-            selected = next((tpl for tpl in repo_items if tpl.label == label), None)
-        else:
-            st.warning("Aucun template trouvé dans templates/estimation. Ajoutez-en via Git.")
-            if legacy_items:
-                label = st.selectbox(
-                    "Templates hérités (MFY_* ou dossiers locaux)",
-                    options=[tpl.label for tpl in legacy_items],
-                    key=f"{select_key}_legacy",
-                )
-                selected = next((tpl for tpl in legacy_items if tpl.label == label), None)
-        return selected
-
-    selected_template = _select_template("estimation", select_key="estimation_tpl")
+            selected_template = next((tpl for tpl in legacy_templates if tpl.label == label), None)
 
     with st.expander("Template uploadé (non persistant)", expanded=False):
         st.caption("Les fichiers déposés ici ne sont pas persistants sur Streamlit Community Cloud.")
@@ -244,6 +276,8 @@ def render(config):
                     key="estimation_uploaded_select",
                 )
                 selected_template = next((tpl for tpl in upload_items if tpl.label == label), selected_template)
+        elif not templates:
+            st.info("Déposez un template ou ajoutez un fichier dans le dépôt pour continuer.")
 
     geocode_debug = st.checkbox("Debug géocodage", key="geocode_debug_toggle")
 
@@ -814,13 +848,15 @@ def render(config):
     with c3:
         coef_opt = st.number_input("Coef optimiste", min_value=0.5, max_value=2.0, value=1.10, step=0.05, key="sc_o")
 
+    days_per_month = ESTIMATION_DAYS_PER_MONTH_CD if estimation_type == "CD" else ESTIMATION_DAYS_PER_MONTH_MD
+
     calc = compute_revenue(RevenueInputs(
         prix_nuitee=float(prix_nuitee),
         taux_occupation_pct=float(taux_occupation),
         platform_fee_pct=float(platform_fee_pct),
         mfy_commission_pct=float(mfy_commission_pct),
         frais_menage_mensuels=float(cleaning_fee_eur),
-    ))
+    ), days_per_month=days_per_month)
 
     REV_BRUT = calc["revenu_brut"]
     FRAIS_GEN = calc["frais_generaux"]
@@ -861,39 +897,45 @@ def render(config):
     st.markdown("**Évo du prix/nuitée**")
     histo_col_btn, histo_col_preview = st.columns([1, 3])
     histo_error = None
-    try:
-        base_price_value = _resolve_base_nightly_price()
-    except ValueError as exc:
-        base_price_value = None
-        histo_error = str(exc)
+    if should_generate_estimation_histo(estimation_type):
+        try:
+            base_price_value = _resolve_base_nightly_price()
+        except ValueError as exc:
+            base_price_value = None
+            histo_error = str(exc)
 
-    with histo_col_btn:
-        regen_clicked = st.button(
-            "(Re)générer graphique",
-            key="regen_estimation_histo",
-            disabled=base_price_value is None,
-        )
-        if histo_error:
-            st.error(histo_error)
-        if regen_clicked and base_price_value is not None:
-            try:
-                plot_path = build_estimation_histo(base_price_value)
-                st.session_state["estimation_histo_png"] = plot_path
-                st.success("Graphique mis à jour.")
-            except Exception as exc:
-                st.error(f"Échec de la génération du graphique: {exc}")
+        with histo_col_btn:
+            regen_clicked = st.button(
+                "(Re)générer graphique",
+                key="regen_estimation_histo",
+                disabled=base_price_value is None,
+            )
+            if histo_error:
+                st.error(histo_error)
+            if regen_clicked and base_price_value is not None:
+                try:
+                    plot_path = generate_estimation_histo_if_needed(estimation_type, base_price_value)
+                    st.session_state["estimation_histo_png"] = plot_path
+                    st.success("Graphique mis à jour.")
+                except Exception as exc:
+                    st.error(f"Échec de la génération du graphique: {exc}")
 
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    default_plot_path = os.path.join(base_dir, "out", "plots", "estimation_histo.png")
-    preview_path = st.session_state.get("estimation_histo_png", default_plot_path)
-    if not preview_path or not os.path.exists(preview_path):
-        preview_path = None
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        default_plot_path = os.path.join(base_dir, "out", "plots", "estimation_histo.png")
+        preview_path = st.session_state.get("estimation_histo_png", default_plot_path)
+        if not preview_path or not os.path.exists(preview_path):
+            preview_path = None
 
-    with histo_col_preview:
-        if preview_path:
-            st.image(preview_path, caption="Évo du prix/nuitée")
-        elif not histo_error:
-            st.caption("Graphique non généré pour le moment.")
+        with histo_col_preview:
+            if preview_path:
+                st.image(preview_path, caption="Évo du prix/nuitée")
+            elif not histo_error:
+                st.caption("Graphique non généré pour le moment.")
+    else:
+        with histo_col_btn:
+            st.info("Mode MD : histogramme ignoré.")
+        with histo_col_preview:
+            st.caption("Le template Moyenne durée ne contient pas la section graphique.")
 
     transports_compact = build_compact_transport_texts(
         st.session_state.get("transport_metro_texte", ""),
@@ -974,8 +1016,8 @@ def render(config):
             validation_result = validate_pptx_template(
                 est_tpl_path,
                 set(mapping.keys()),
-                get_estimation_requirements(),
-                requirement_detectors=get_estimation_detectors(),
+                get_estimation_requirements(estimation_type),
+                requirement_detectors=get_estimation_detectors(estimation_type),
             )
         except Exception as exc:
             st.warning(f"Validation du template Estimation impossible: {exc}")
@@ -983,25 +1025,29 @@ def render(config):
 
     # ---- Generate Estimation ----
     st.subheader("Générer l'Estimation (PPTX)")
-    disable_generate = strict_mode and validation_result is not None and validation_result.severity == "KO"
+    disable_generate = (selected_template is None) or (strict_mode and validation_result is not None and validation_result.severity == "KO")
     if st.button("Générer le PPTX (Estimation)", disabled=disable_generate):
         if not est_tpl_path or not os.path.exists(est_tpl_path):
             st.error("Aucun template PPTX sélectionné ou fichier introuvable. Déposez/choisissez un template ci-dessus.")
             st.stop()
-        try:
-            base_price_value = _resolve_base_nightly_price()
-        except ValueError as exc:
-            st.error(f"Impossible de générer le graphique: {exc}")
-            st.stop()
-        try:
-            histo_path = build_estimation_histo(base_price_value)
-            st.session_state["estimation_histo_png"] = histo_path
-        except Exception as exc:
-            st.error(f"Graphique estimation indisponible: {exc}")
-            st.stop()
+        histo_path = None
+        if should_generate_estimation_histo(estimation_type):
+            try:
+                base_price_value = _resolve_base_nightly_price()
+            except ValueError as exc:
+                st.error(f"Impossible de générer le graphique: {exc}")
+                st.stop()
+            try:
+                histo_path = generate_estimation_histo_if_needed(estimation_type, base_price_value)
+                st.session_state["estimation_histo_png"] = histo_path
+            except Exception as exc:
+                st.error(f"Graphique estimation indisponible: {exc}")
+                st.stop()
+        else:
+            run_report.add_note("Mode MD: histogramme ignoré")
         _auto_geocode_or_stop("Géocodage automatique (génération)")
         _attach_map(image_by_shape)
-        pptx_out = os.path.join(OUT_DIR, f"Estimation - {st.session_state.get('bien_addr','bien')}.pptx")
+        pptx_out = os.path.join(OUT_DIR, f"Estimation {estimation_type} - {st.session_state.get('bien_addr','bien')}.pptx")
         generation_report = generate_estimation_pptx(
             est_tpl_path,
             pptx_out,
