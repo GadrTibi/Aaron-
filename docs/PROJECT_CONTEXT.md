@@ -45,14 +45,16 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
 
 ## Templates attendus
 - PPTX Estimation : fichiers dans `templates/estimation` versionnés (prioritaires) ou, s’ils sont absents, dossiers hérités `MFY_EST_TPL_DIR` / `MFY_TPL_DIR`. Upload ponctuel possible (non persistant en cloud). 【app/services/template_catalog.py†L49-L88】【app/views/estimation.py†L96-L163】
-- DOCX Mandat : modèles Git dans `templates/mandat` puis fallback éventuel vers `MFY_MAND_TPL_DIR`/`MFY_TPL_DIR`. Upload ponctuel autorisé. 【app/services/template_catalog.py†L49-L88】【app/views/mandat.py†L17-L78】
+- DOCX Mandat : modèles Git dans `templates/mandat/cd/` (courte durée) ou `templates/mandat/md/` (moyenne durée/bail mobilité) puis fallback éventuel vers `templates/mandat/` racine ou `MFY_MAND_TPL_DIR`/`MFY_TPL_DIR`. Upload ponctuel autorisé (non persistant). 【app/services/template_catalog.py†L80-L115】【app/views/mandat.py†L17-L126】
 - PPTX Book : modèles Git dans `templates/book` ou fallback hérité. Upload ponctuel autorisé. 【app/services/template_catalog.py†L49-L88】【app/views/book.py†L79-L157】
 - Structure versionnée recommandée (persistante sur Streamlit Cloud) :
   ```
   templates/
-    estimation/   # PPTX
-    mandat/       # DOCX
-    book/         # PPTX
+    estimation/      # PPTX
+    mandat/
+      cd/            # DOCX mandat courte durée
+      md/            # DOCX mandat moyenne durée (bail mobilité)
+    book/            # PPTX
   ```
   Des fichiers `.gitkeep` maintiennent l’arborescence si aucun template n’est encore ajouté.
 - Recommandations de nommage : suffixer par le type (`estimation_classique.pptx`, `mandat_meuble.docx`, `book_fr.pptx`) pour apparaître triés alphabétiquement dans l’UI.

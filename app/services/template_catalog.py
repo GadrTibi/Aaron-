@@ -73,6 +73,48 @@ def list_repo_templates(kind: str) -> list[Path]:
     return _list_dir(repo_dir, ext)
 
 
+def _to_items(paths: list[Path], source: TemplateSource) -> list[TemplateItem]:
+    return [TemplateItem(label=p.name, source=source, path=p) for p in paths]
+
+
+def list_repo_mandat_templates(mandat_type: str) -> list[TemplateItem]:
+    """Liste les templates mandat dans le repo selon le type (CD/MD)."""
+
+    repo_templates = template_roots.list_mandat_templates(mandat_type)
+    if repo_templates:
+        return _to_items(repo_templates, "repo")
+
+    legacy_repo_templates = template_roots.list_legacy_mandat_templates()
+    return _to_items(legacy_repo_templates, "repo")
+
+
+def list_env_templates(kind: str) -> list[TemplateItem]:
+    """Liste les templates hérités (variables MFY_* ou dossiers locaux)."""
+
+    ext = _KIND_EXT.get(kind)
+    if not ext:
+        raise ValueError(f"Type de template inconnu: {kind}")
+
+    for legacy_dir in _iter_env_dirs(kind):
+        legacy_templates = _list_dir(legacy_dir, ext)
+        if legacy_templates:
+            return _to_items(legacy_templates, "env")
+    return []
+
+
+def list_effective_mandat_templates(mandat_type: str) -> list[TemplateItem]:
+    """
+    Retourne les templates mandat disponibles pour un type donné en priorisant
+    les dossiers versionnés du repo (templates/mandat/cd|md), puis les fichiers
+    hérités (env ou templates/mandat/ racine pour compat).
+    """
+
+    repo_items = list_repo_mandat_templates(mandat_type)
+    if repo_items:
+        return repo_items
+    return list_env_templates("mandat")
+
+
 def list_effective_templates(kind: str) -> list[TemplateItem]:
     """
     Retourne les templates utilisables, en priorisant ceux du repo Git. Si aucun

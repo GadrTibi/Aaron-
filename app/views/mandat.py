@@ -8,7 +8,11 @@ from app.services.generation_report import GenerationReport
 from app.services.mandat_templates import filter_mandat_templates
 from app.services.mandat_tokens import build_mandat_mapping
 from app.services.docx_fill import generate_docx_from_template
-from app.services.template_catalog import TemplateItem, list_effective_templates
+from app.services.template_catalog import (
+    TemplateItem,
+    list_effective_mandat_templates,
+    list_repo_mandat_templates,
+)
 from app.services import template_roots
 from app.services.token_utils import extract_docx_tokens
 from app.services.token_audit import audit_template_tokens
@@ -25,37 +29,66 @@ def render(config):
     st.subheader("Templates Mandat (DOCX)")
     st.caption(f"Templates serveur (Git) : {template_roots.MANDAT_TPL_DIR}")
 
-    def _select_template(kind: str, select_key: str) -> TemplateItem | None:
-        mandat_type = st.session_state.get("mandat_type", "Courte durée (CD)")
-        effective = list_effective_templates(kind)
-        filtered = filter_mandat_templates(effective, mandat_type)
-        if not filtered and effective:
-            st.warning("Aucun template filtré trouvé, affichage complet")
-            filtered = effective
-        options = filtered or effective
-        repo_items = [tpl for tpl in options if tpl.source == "repo"]
-        legacy_items = [tpl for tpl in options if tpl.source != "repo"]
-        selected: TemplateItem | None = None
+    def _select_template(mandat_type: str, select_key: str) -> TemplateItem | None:
+        repo_items = list_repo_mandat_templates(mandat_type)
+        filtered_repo = filter_mandat_templates(repo_items, mandat_type)
+        options = filtered_repo or repo_items
 
-        if repo_items:
+        fallback_cd: list[TemplateItem] = []
+        if not options and mandat_type == "MD":
+            st.warning("Aucun template trouvé dans templates/mandat/md/. Ajoutez un .docx via Git.")
+            fallback_cd = list_repo_mandat_templates("CD")
+            filtered_cd = filter_mandat_templates(fallback_cd, "CD")
+            fallback_cd = filtered_cd or fallback_cd
+            if not fallback_cd:
+                fallback_cd = list_effective_mandat_templates("CD")
+                filtered_cd_effective = filter_mandat_templates(fallback_cd, "CD")
+                fallback_cd = filtered_cd_effective or fallback_cd
+        elif not options:
+            st.warning("Aucun template trouvé dans templates/mandat/cd/. Ajoutez un .docx via Git.")
+
+        if not options:
+            options = list_effective_mandat_templates(mandat_type)
+            filtered = filter_mandat_templates(options, mandat_type)
+            if not filtered and options:
+                st.warning("Aucun template filtré trouvé, affichage complet")
+            options = filtered or options
+
+        selected: TemplateItem | None = None
+        if options:
             label = st.selectbox(
-                "Templates serveur (Git)",
-                options=[tpl.label for tpl in repo_items],
-                key=f"{select_key}_repo",
+                "Templates serveur (Git)" if options[0].source == "repo" else "Templates hérités (MFY_* ou dossiers locaux)",
+                options=[tpl.label for tpl in options],
+                key=f"{select_key}_{mandat_type.lower()}",
             )
-            selected = next((tpl for tpl in repo_items if tpl.label == label), None)
-        elif legacy_items:
+            selected = next((tpl for tpl in options if tpl.label == label), None)
+
+        if not selected and fallback_cd:
+            st.info("Templates Courte durée (CD) disponibles en secours.")
             label = st.selectbox(
-                "Templates hérités (MFY_* ou dossiers locaux)",
-                options=[tpl.label for tpl in legacy_items],
-                key=f"{select_key}_legacy",
+                "Templates Courte durée (CD)",
+                options=[tpl.label for tpl in fallback_cd],
+                key=f"{select_key}_cd_fallback",
             )
-            selected = next((tpl for tpl in legacy_items if tpl.label == label), None)
-        else:
-            st.warning("Aucun template trouvé dans templates/mandat. Ajoutez-en via Git.")
+            selected = next((tpl for tpl in fallback_cd if tpl.label == label), None)
+
+        if not selected and not options and not fallback_cd:
+            st.warning("Aucun template Mandat disponible. Ajoutez un .docx via Git ou via MFY_MAND_TPL_DIR.")
+
         return selected
 
-    selected_template = _select_template("mandat", select_key="mandat_tpl")
+    # ---- UI Mandat sans redondance ----
+    st.subheader("Mandat (DOCX)")
+
+    mandat_type_label = st.radio(
+        "Type de mandat",
+        options=["Courte durée (CD)", "Moyenne durée (MD)"],
+        key="mandat_type_ui",
+    )
+    mandat_type = "MD" if "MD" in mandat_type_label else "CD"
+    st.session_state["mandat_type"] = mandat_type_label
+
+    selected_template = _select_template(mandat_type, select_key="mandat_tpl")
 
     with st.expander("Template uploadé (non persistant)", expanded=False):
         st.caption("Les fichiers déposés ici ne sont pas persistants sur Streamlit Community Cloud.")
@@ -107,14 +140,6 @@ def render(config):
                 )
                 selected_template = next((tpl for tpl in upload_items if tpl.label == label), selected_template)
 
-    # ---- UI Mandat sans redondance ----
-    st.subheader("Mandat (DOCX)")
-
-    st.radio(
-        "Type de mandat",
-        options=["Courte durée (CD)", "Moyenne durée (MD - Bail mobilité)"],
-        key="mandat_type",
-    )
     st.date_input(
         "Date de signature",
         key="mandat_signature_date",
