@@ -14,7 +14,7 @@ def test_mandat_md_signature_tokens_present(tmp_path):
     tpl_path = tmp_path / "mandat_md.docx"
     doc.save(tpl_path)
 
-    mapping = build_mandat_mapping({}, date(2025, 5, 12))
+    mapping = build_mandat_mapping({"owner_type": "Personne physique"}, date(2025, 5, 12))
     out_path = tmp_path / "out.docx"
 
     report = generate_docx_from_template(str(tpl_path), str(out_path), mapping, strict=True)

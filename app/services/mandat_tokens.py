@@ -28,13 +28,28 @@ def build_mandat_mapping(ss: dict, signature_date: Optional[date] = None) -> dic
     eau_chaude = ss.get("bien_eau_chaude", ss.get("bien_eau_chaude_mode", ""))
 
     # Proprio (saisis ailleurs, sinon l'UI Mandat complète)
-    forme_prop = ss.get("owner_forme", ss.get("own_forme", ""))
-    nom_prop = ss.get("owner_nom", ss.get("own_nom", ""))
-    prenom_prop = ss.get("owner_prenom", ss.get("own_prenom", ""))
-    adr_prop = ss.get("owner_adresse", ss.get("own_addr", ""))
+    owner_type = ss.get("owner_type")
+    if not owner_type:
+        raise ValueError("Type de propriétaire manquant.")
+
+    nom_prop = ss.get("owner_last_name", ss.get("owner_nom", ss.get("own_nom", "")))
+    prenom_prop = ss.get("owner_first_name", ss.get("owner_prenom", ss.get("own_prenom", "")))
+    adr_prop = ss.get("owner_address", ss.get("owner_adresse", ss.get("own_addr", "")))
     cp_prop = ss.get("owner_cp", ss.get("own_cp", ""))
     ville_prop = ss.get("owner_ville", ss.get("own_ville", ""))
     mail_prop = ss.get("owner_email", ss.get("own_email", ""))
+
+    if owner_type == "Personne morale":
+        company_legal_form = ss.get("company_legal_form", "")
+        company_name = ss.get("company_name", "")
+        company_address = ss.get("company_address", "")
+        suffix = f" ({company_legal_form})" if company_legal_form else ""
+        forme_prop = f"Personne morale{suffix}"
+        nom_prop = company_name
+        prenom_prop = ""
+        adr_prop = company_address
+    else:
+        forme_prop = "Personne physique"
 
     # Compléments spécifiques Mandat (UI Mandat uniquement)
     type_peau = ss.get("mandat_type_pieces_eau", "Salle(s) d’eau")

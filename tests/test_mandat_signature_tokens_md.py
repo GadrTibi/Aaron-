@@ -16,7 +16,7 @@ def test_md_tokens_are_replaced(tmp_path: Path):
     doc.save(template_path)
 
     sig_date = date(2025, 12, 30)
-    mapping = build_mandat_mapping({}, signature_date=sig_date)
+    mapping = build_mandat_mapping({"owner_type": "Personne physique"}, signature_date=sig_date)
 
     generate_docx_from_template(str(template_path), str(output_path), mapping)
 

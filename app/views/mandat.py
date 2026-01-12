@@ -80,6 +80,16 @@ def render(config):
     # ---- UI Mandat sans redondance ----
     st.subheader("Mandat (DOCX)")
 
+    owner_type = st.radio(
+        "Type de propriétaire",
+        options=["Personne physique", "Personne morale"],
+        key="owner_type",
+        index=None,
+    )
+    if owner_type is None:
+        st.warning("Veuillez sélectionner le type de propriétaire pour continuer.")
+        return
+
     mandat_type_label = st.radio(
         "Type de mandat",
         options=["Courte durée (CD)", "Moyenne durée (MD)"],
@@ -179,12 +189,38 @@ def render(config):
     st.text_area("Destination du bien (texte)", key="mandat_destination_bien")
     st.text_area("Remise de pièces (liste/texte)", key="mandat_remise_pieces")
 
-    if not (st.session_state.get("owner_nom") or st.session_state.get("own_nom")):
+    if owner_type == "Personne physique":
+        st.caption("Nom / Prénom du propriétaire")
+    else:
+        st.caption("Raison sociale + Nom société + Adresse de domiciliation")
+
+    show_owner_fields = owner_type == "Personne morale" or not (
+        st.session_state.get("owner_last_name")
+        or st.session_state.get("owner_nom")
+        or st.session_state.get("own_nom")
+    )
+    if show_owner_fields:
         st.markdown("**Propriétaire (si non saisi ailleurs)**")
-        st.text_input("Forme du propriétaire", key="owner_forme")
-        st.text_input("Nom", key="owner_nom")
-        st.text_input("Prénom", key="owner_prenom")
-        st.text_input("Adresse", key="owner_adresse")
+        if owner_type == "Personne physique":
+            st.text_input(
+                "Nom",
+                key="owner_last_name",
+                value=st.session_state.get("owner_nom", st.session_state.get("own_nom", "")),
+            )
+            st.text_input(
+                "Prénom",
+                key="owner_first_name",
+                value=st.session_state.get("owner_prenom", st.session_state.get("own_prenom", "")),
+            )
+            st.text_input(
+                "Adresse",
+                key="owner_address",
+                value=st.session_state.get("owner_adresse", st.session_state.get("own_addr", "")),
+            )
+        else:
+            st.text_input("Raison sociale", key="company_legal_form")
+            st.text_input("Nom de la société", key="company_name")
+            st.text_input("Adresse de domiciliation", key="company_address")
         st.text_input("Code postal", key="owner_cp")
         st.text_input("Ville", key="owner_ville")
         st.text_input("Email", key="owner_email")
