@@ -105,23 +105,9 @@ def read_local_secret(name: str, default: str = "") -> str:
     if not name:
         return default
 
-    env_value = os.getenv(name)
-    if env_value:
-        return env_value
-
-    try:
-        import streamlit as st  # peut ne pas exister hors runtime
-
-        secrets_obj = getattr(st, "secrets", None)
-        if secrets_obj is not None:
-            try:
-                value = secrets_obj.get(name, "")
-                if value:
-                    return str(value)
-            except Exception:
-                pass
-    except Exception:
-        pass
+    resolved, _source = resolve_api_key(name)
+    if resolved:
+        return resolved
 
     for path in _secrets_search_paths():
         try:
@@ -132,6 +118,10 @@ def read_local_secret(name: str, default: str = "") -> str:
             return str(payload[name])
 
     return default
+
+
+def _is_streamlit_cloud() -> bool:
+    return str(os.getenv("STREAMLIT_SERVER_HEADLESS", "")).lower() == "true"
 
 
 def write_local_secret(name: str, value: str) -> None:
@@ -187,12 +177,21 @@ def _render_key_block(st, *, title: str, key_name: str, help_text: str) -> None:
                 _delete_local_secret(key_name)
                 st.info("Clé locale effacée.")
 
+    if _is_streamlit_cloud():
+        st.info(
+            "En Streamlit Cloud, configurez la clé dans Settings → Secrets. "
+            "La saisie locale n'est pas persistante après redéploiement."
+        )
+    else:
+        st.caption("Stockage local: ~/.mfy_local_app/secrets.toml (chmod 600).")
+
 
 # --- UI RENDER (ajuste la section qui lit/affiche la clé) ---
 def render(config):  # type: ignore[override]
     import streamlit as st
 
     st.subheader("Clés API")
+    st.caption("Priorité de résolution : variables d'environnement → Streamlit Secrets → fichier local.")
     _render_key_block(
         st,
         title="Google Maps Platform",

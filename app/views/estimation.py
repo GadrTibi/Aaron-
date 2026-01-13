@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Optional
@@ -33,7 +34,8 @@ from app.services.revenue import (
     ESTIMATION_DAYS_PER_MONTH_MD,
     RevenueInputs,
     build_revenue_token_mapping,
-    compute_revenue,
+    compute_estimation_financials,
+    format_eur_with_symbol,
 )
 from app.services.template_catalog import list_effective_estimation_templates
 from app.services.template_validation import validate_pptx_template
@@ -100,6 +102,36 @@ def _resolve_base_nightly_price() -> float:
             except (TypeError, ValueError):
                 continue
     raise ValueError("Paramètre 'base_nightly_price' introuvable dans l'état de l'application.")
+
+
+def _update_financials_state(
+    state: dict,
+    *,
+    prix_nuitee: float,
+    taux_occupation: float,
+    platform_fee_pct: float,
+    mfy_commission_pct: float,
+    cleaning_fee_eur: float,
+    days_per_month: float,
+    coef_pess: float,
+    coef_cible: float,
+    coef_opt: float,
+) -> None:
+    calc = compute_estimation_financials(
+        RevenueInputs(
+            prix_nuitee=float(prix_nuitee),
+            taux_occupation_pct=float(taux_occupation),
+            platform_fee_pct=float(platform_fee_pct),
+            mfy_commission_pct=float(mfy_commission_pct),
+            frais_menage_mensuels=float(cleaning_fee_eur),
+        ),
+        days_per_month=days_per_month,
+        coef_pess=coef_pess,
+        coef_cible=coef_cible,
+        coef_opt=coef_opt,
+    )
+    calc["financials_last_updated"] = datetime.now().isoformat(timespec="seconds")
+    state.update(calc)
 
 def _collect_line_refs(items: list, limit: Optional[int] = None) -> list[str]:
     refs: list[str] = []
@@ -850,26 +882,59 @@ def render(config):
 
     days_per_month = ESTIMATION_DAYS_PER_MONTH_CD if estimation_type == "CD" else ESTIMATION_DAYS_PER_MONTH_MD
 
-    calc = compute_revenue(RevenueInputs(
-        prix_nuitee=float(prix_nuitee),
-        taux_occupation_pct=float(taux_occupation),
-        platform_fee_pct=float(platform_fee_pct),
-        mfy_commission_pct=float(mfy_commission_pct),
-        frais_menage_mensuels=float(cleaning_fee_eur),
-    ), days_per_month=days_per_month)
+    if "revenu_brut" not in st.session_state:
+        _update_financials_state(
+            st.session_state,
+            prix_nuitee=prix_nuitee,
+            taux_occupation=taux_occupation,
+            platform_fee_pct=platform_fee_pct,
+            mfy_commission_pct=mfy_commission_pct,
+            cleaning_fee_eur=cleaning_fee_eur,
+            days_per_month=days_per_month,
+            coef_pess=coef_pess,
+            coef_cible=coef_cible,
+            coef_opt=coef_opt,
+        )
 
-    REV_BRUT = calc["revenu_brut"]
-    FRAIS_GEN = calc["frais_generaux"]
-    REV_NET = calc["revenu_net"]
-    JOURS_OCC = calc["jours_occupes"]
-    PLATFORM_FEE_PCT = calc["platform_fee_pct"]
-    PLATFORM_FEE_EUR = calc["platform_fee_eur"]
-    BASE_COMMISSION = calc["base_commission"]
-    MFY_COMMISSION_PCT = calc["mfy_commission_pct"]
-    MFY_COMMISSION_EUR = calc["mfy_commission_eur"]
-    CLEANING_FEE_EUR = calc["cleaning_fee_eur"]
+    refresh_clicked = st.button("Rafraîchir les calculs")
+    if refresh_clicked:
+        _update_financials_state(
+            st.session_state,
+            prix_nuitee=prix_nuitee,
+            taux_occupation=taux_occupation,
+            platform_fee_pct=platform_fee_pct,
+            mfy_commission_pct=mfy_commission_pct,
+            cleaning_fee_eur=cleaning_fee_eur,
+            days_per_month=days_per_month,
+            coef_pess=coef_pess,
+            coef_cible=coef_cible,
+            coef_opt=coef_opt,
+        )
+        st.success("Calculs mis à jour.")
 
-    revenue_mapping = build_revenue_token_mapping(calc)
+    REV_BRUT = float(st.session_state.get("revenu_brut", 0.0))
+    FRAIS_GEN = float(st.session_state.get("frais_generaux", 0.0))
+    REV_NET = float(st.session_state.get("revenu_net", 0.0))
+    JOURS_OCC = float(st.session_state.get("jours_occupes", 0.0))
+    PLATFORM_FEE_PCT = float(st.session_state.get("platform_fee_pct", 0.0))
+    PLATFORM_FEE_EUR = float(st.session_state.get("platform_fee_eur", 0.0))
+    BASE_COMMISSION = float(st.session_state.get("base_commission", 0.0))
+    MFY_COMMISSION_PCT = float(st.session_state.get("mfy_commission_pct", 0.0))
+    MFY_COMMISSION_EUR = float(st.session_state.get("mfy_commission_eur", 0.0))
+    CLEANING_FEE_EUR = float(st.session_state.get("cleaning_fee_eur", 0.0))
+
+    revenue_mapping = build_revenue_token_mapping({
+        "revenu_brut": REV_BRUT,
+        "frais_generaux": FRAIS_GEN,
+        "revenu_net": REV_NET,
+        "jours_occupes": JOURS_OCC,
+        "platform_fee_pct": PLATFORM_FEE_PCT,
+        "platform_fee_eur": PLATFORM_FEE_EUR,
+        "base_commission": BASE_COMMISSION,
+        "mfy_commission_pct": MFY_COMMISSION_PCT,
+        "mfy_commission_eur": MFY_COMMISSION_EUR,
+        "cleaning_fee_eur": CLEANING_FEE_EUR,
+    })
 
     st.metric("Jours loués / mois", f"{JOURS_OCC:.1f} j")
     colX, colY, colZ = st.columns(3)
@@ -886,13 +951,14 @@ def render(config):
             "mfy_commission_pct": MFY_COMMISSION_PCT,
             "mfy_commission_eur": MFY_COMMISSION_EUR,
             "cleaning_fee_eur": CLEANING_FEE_EUR,
+            "financials_last_updated": st.session_state.get("financials_last_updated", ""),
         })
         st.json(revenue_mapping)
 
     # Scénarios prix
-    PRIX_PESS = prix_nuitee * coef_pess
-    PRIX_CIBLE = prix_nuitee * coef_cible
-    PRIX_OPT = prix_nuitee * coef_opt
+    PRIX_PESS = float(st.session_state.get("prix_pess", prix_nuitee * coef_pess))
+    PRIX_CIBLE = float(st.session_state.get("prix_cible", prix_nuitee * coef_cible))
+    PRIX_OPT = float(st.session_state.get("prix_opt", prix_nuitee * coef_opt))
 
     st.markdown("**Évo du prix/nuitée**")
     histo_col_btn, histo_col_preview = st.columns([1, 3])
@@ -970,11 +1036,11 @@ def render(config):
         "[[CHALLENGE_2]]": st.session_state.get('ch2',''),
         "[[CHALLENGE_3]]": st.session_state.get('ch3',''),
         # Slide 6
-        "[[PRIX_NUIT]]": f"{st.session_state.get('rn_prix',0):.0f} €",
+        "[[PRIX_NUIT]]": format_eur_with_symbol(float(st.session_state.get("rn_prix", 0))),
         "[[TAUX_OCC]]": f"{st.session_state.get('rn_occ',0)} %",
-        "[[PRIX_PESSIMISTE]]": f"{PRIX_PESS:.0f} €",
-        "[[PRIX_CIBLE]]": f"{PRIX_CIBLE:.0f} €",
-        "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",
+        "[[PRIX_PESSIMISTE]]": format_eur_with_symbol(PRIX_PESS),
+        "[[PRIX_CIBLE]]": format_eur_with_symbol(PRIX_CIBLE),
+        "[[PRIX_OPTIMISTE]]": format_eur_with_symbol(PRIX_OPT),
     }
     mapping.update(revenue_mapping)
 

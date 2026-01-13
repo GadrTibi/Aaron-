@@ -15,8 +15,16 @@ class RevenueInputs:
     frais_menage_mensuels: float
 
 
-def format_eur(value: float) -> str:
+def format_eur_no_symbol(value: float) -> str:
+    return f"{value:.0f}"
+
+
+def format_eur_with_symbol(value: float) -> str:
     return f"{value:.0f} €"
+
+
+def format_eur(value: float) -> str:
+    return format_eur_with_symbol(value)
 
 
 def _format_pct(value: float) -> str:
@@ -50,6 +58,23 @@ def compute_revenue(inp: RevenueInputs, *, days_per_month: float = 30.0):
     }
 
 
+def compute_estimation_financials(
+    inp: RevenueInputs,
+    *,
+    days_per_month: float,
+    coef_pess: float,
+    coef_cible: float,
+    coef_opt: float,
+) -> dict[str, float]:
+    calc = compute_revenue(inp, days_per_month=days_per_month)
+    return {
+        **calc,
+        "prix_pess": inp.prix_nuitee * coef_pess,
+        "prix_cible": inp.prix_nuitee * coef_cible,
+        "prix_opt": inp.prix_nuitee * coef_opt,
+    }
+
+
 def build_revenue_token_mapping(calc: Mapping[str, float]) -> dict[str, str]:
     revenu_brut = float(calc.get("revenu_brut", 0.0))
     frais_generaux = float(calc.get("frais_generaux", 0.0))
@@ -62,13 +87,13 @@ def build_revenue_token_mapping(calc: Mapping[str, float]) -> dict[str, str]:
     mfy_commission_eur = float(calc.get("mfy_commission_eur", 0.0))
 
     return {
-        "[[REV_BRUT]]": format_eur(revenu_brut),
-        "[[FRAIS_GEN]]": format_eur(frais_generaux),
-        "[[REV_NET]]": format_eur(revenu_net),
+        "[[REV_BRUT]]": format_eur_with_symbol(revenu_brut),
+        "[[FRAIS_GEN]]": format_eur_with_symbol(frais_generaux),
+        "[[REV_NET]]": format_eur_with_symbol(revenu_net),
         "[[JOURS_OCC]]": f"{jours_occupes:.1f} j",
         "[[PLATFORM_FEE_PCT]]": _format_pct(platform_fee_pct),
-        "[[PLATFORM_FEE_EUR]]": format_eur(platform_fee_eur),
-        "[[CLEANING_FEE_EUR]]": format_eur(cleaning_fee_eur),
+        "[[PLATFORM_FEE_EUR]]": format_eur_with_symbol(platform_fee_eur),
+        "[[CLEANING_FEE_EUR]]": format_eur_with_symbol(cleaning_fee_eur),
         "[[MFY_COMMISSION_PCT]]": _format_pct(mfy_commission_pct),
-        "[[MFY_COMMISSION_EUR]]": format_eur(mfy_commission_eur),
+        "[[MFY_COMMISSION_EUR]]": format_eur_with_symbol(mfy_commission_eur),
     }

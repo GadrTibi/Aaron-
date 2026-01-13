@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Iterable
 from urllib.parse import quote_plus
 
 from pptx import Presentation
@@ -88,18 +88,47 @@ def _locate_in_runs(segs, start_pos: int, end_pos: int):
         pos += ln
     return s_run, s_off, e_run, e_off
 
-def _replace_token_in_paragraph(paragraph, token: str, value: str) -> bool:
-    changed = False
+def detect_euro_in_template_context(text: str, token: str, *, index: Optional[int] = None, window: int = 6) -> bool:
+    if not text or not token:
+        return False
+    if index is None:
+        index = text.find(token)
+    if index < 0:
+        return False
+    start = max(0, index - window)
+    end = min(len(text), index + len(token) + window)
+    return "€" in text[start:end]
+
+
+def _strip_euro_symbol(value: str) -> str:
+    if not value:
+        return value
+    stripped = value.replace("€", "").strip()
+    return stripped
+
+
+def _replace_token_in_paragraph(paragraph, token: str, value: str) -> list[Optional[object]]:
+    sizes: list[Optional[object]] = []
     while True:
         combined, segs = _rebuild_index(paragraph)
         idx = combined.find(token)
-        if idx < 0: break
+        if idx < 0:
+            break
         start, end = idx, idx + len(token)
         s_run, s_off, e_run, e_off = _locate_in_runs(segs, start, end)
         style_run = paragraph.runs[s_run]
 
-        pre = style_run.text[:s_off]
-        style_run.text = pre + value
+        insert_value = value
+        if "€" in value and detect_euro_in_template_context(combined, token, index=idx):
+            insert_value = _strip_euro_symbol(value)
+
+        original_text = style_run.text or ""
+        pre = original_text[:s_off]
+        if e_run == s_run:
+            suffix = original_text[e_off:]
+            style_run.text = pre + insert_value + suffix
+        else:
+            style_run.text = pre + insert_value
 
         for ridx in range(s_run + 1, e_run):
             paragraph.runs[ridx].text = ""
@@ -107,15 +136,49 @@ def _replace_token_in_paragraph(paragraph, token: str, value: str) -> bool:
             last = paragraph.runs[e_run]
             suffix = last.text[e_off:]
             last.text = suffix
-        changed = True
-    return changed
+        sizes.append(style_run.font.size)
+    return sizes
 
-def replace_text_preserving_style(shapes, mapping: Dict[str, str]) -> None:
+
+def _find_reference_font_size(shapes, token: str) -> Optional[object]:
+    for shape in walk_pptx_shapes(shapes):
+        if not hasattr(shape, "text_frame") or not shape.text_frame:
+            continue
+        for para in shape.text_frame.paragraphs:
+            combined, segs = _rebuild_index(para)
+            idx = combined.find(token)
+            if idx < 0:
+                continue
+            s_run, _, _, _ = _locate_in_runs(segs, idx, idx + len(token))
+            if s_run is not None and para.runs:
+                return para.runs[s_run].font.size
+    return None
+
+
+def _apply_font_size(paragraph, size: Optional[object]) -> None:
+    if size is None:
+        return
+    for run in paragraph.runs:
+        run.font.size = size
+
+
+def replace_text_preserving_style(
+    shapes,
+    mapping: Dict[str, str],
+    *,
+    force_font_size_tokens: Optional[Iterable[str]] = None,
+    reference_token: Optional[str] = None,
+) -> None:
+    force_tokens = set(force_font_size_tokens or [])
+    reference_size = _find_reference_font_size(shapes, reference_token) if reference_token else None
     for shape in walk_pptx_shapes(shapes):
         if hasattr(shape, "text_frame") and shape.text_frame:
             for para in shape.text_frame.paragraphs:
                 for token, value in mapping.items():
-                    _replace_token_in_paragraph(para, token, value)
+                    sizes = _replace_token_in_paragraph(para, token, value)
+                    if sizes and token in force_tokens:
+                        size_to_apply = reference_size or sizes[0]
+                        _apply_font_size(para, size_to_apply)
 
 def insert_image(slide, image_path: str, left=Inches(1), top=Inches(3), width=Inches(8)) -> None:
     slide.shapes.add_picture(image_path, left, top, width=width)
@@ -174,7 +237,12 @@ def generate_estimation_pptx(
     report = GenerationReport()
     prs = Presentation(template_path)
     for slide in prs.slides:
-        replace_text_preserving_style(slide.shapes, mapping)
+        replace_text_preserving_style(
+            slide.shapes,
+            mapping,
+            force_font_size_tokens={"[[VISITE_1_NOM]]", "[[VISITE_2_NOM]]"},
+            reference_token="[[VISITE_1_NOM]]",
+        )
     if image_by_shape:
         for shape_name, img_path in image_by_shape.items():
             if not img_path:
