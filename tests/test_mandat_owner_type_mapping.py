@@ -29,9 +29,9 @@ def test_mandat_mapping_personne_morale():
         }
     )
 
-    assert "Personne morale" in mapping["«Forme_du_propriétaire»"]
-    assert mapping["«Nom_du_propriétaire»"] == "ACME"
-    assert mapping["«Prénom_du_propriétaire»"] == ""
+    assert mapping["«Forme_du_propriétaire»"] == "Personne morale"
+    assert mapping["«Nom_du_propriétaire»"] == "SAS"
+    assert mapping["«Prénom_du_propriétaire»"] == "ACME"
     assert mapping["«Adresse_du_propriétaire»"] == "10 avenue Victor Hugo"
 
 

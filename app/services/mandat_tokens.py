@@ -43,10 +43,9 @@ def build_mandat_mapping(ss: dict, signature_date: Optional[date] = None) -> dic
         company_legal_form = ss.get("company_legal_form", "")
         company_name = ss.get("company_name", "")
         company_address = ss.get("company_address", "")
-        suffix = f" ({company_legal_form})" if company_legal_form else ""
-        forme_prop = f"Personne morale{suffix}"
-        nom_prop = company_name
-        prenom_prop = ""
+        forme_prop = "Personne morale"
+        nom_prop = company_legal_form
+        prenom_prop = company_name
         adr_prop = company_address
     else:
         forme_prop = "Personne physique"
