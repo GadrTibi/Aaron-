@@ -15,6 +15,11 @@ from app.services.poi_facade import POIResult, get_pois
 from app.services.provider_status import get_provider_status
 from app.services.quartier_enricher import enrich_quartier_and_transports
 from app.services.pptx_fill import generate_estimation_pptx
+from app.services.occupancy_utils import (
+    build_jours_occ_30_mapping,
+    days_occupied_on_30,
+    should_append_days_unit,
+)
 from app.services.pptx_requirements import (
     get_estimation_detectors,
     get_estimation_requirements,
@@ -870,6 +875,16 @@ def render(config):
     CLEANING_FEE_EUR = calc["cleaning_fee_eur"]
 
     revenue_mapping = build_revenue_token_mapping(calc)
+    jours_occ_30_num = days_occupied_on_30(float(taux_occupation))
+    append_days_unit, token_present = should_append_days_unit(
+        selected_template.path if selected_template else None,
+    )
+    if selected_template and not token_present:
+        run_report.add_note("Token [[JOURS_OCC_30]] absent du template")
+    jours_occ_30_mapping = build_jours_occ_30_mapping(
+        float(taux_occupation),
+        include_unit=append_days_unit,
+    )
 
     st.metric("Jours loués / mois", f"{JOURS_OCC:.1f} j")
     colX, colY, colZ = st.columns(3)
@@ -886,6 +901,9 @@ def render(config):
             "mfy_commission_pct": MFY_COMMISSION_PCT,
             "mfy_commission_eur": MFY_COMMISSION_EUR,
             "cleaning_fee_eur": CLEANING_FEE_EUR,
+            "taux_occ_pct": float(taux_occupation),
+            "jours_occ_30_num": jours_occ_30_num,
+            "jours_occ_30_mapping": jours_occ_30_mapping.get("[[JOURS_OCC_30]]"),
         })
         st.json(revenue_mapping)
 
@@ -976,6 +994,7 @@ def render(config):
         "[[PRIX_CIBLE]]": f"{PRIX_CIBLE:.0f} €",
         "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",
     }
+    mapping.update(jours_occ_30_mapping)
     mapping.update(revenue_mapping)
 
     # Images for VISITE_1/2 (from confirmed paths or uploaded files)
