@@ -54,6 +54,7 @@ from .utils import (
 
 
 DEFAULT_RADIUS_M = 300
+POI_RADIUS_KEY = "poi_radius_m"
 
 
 def normalize_estimation_type(label: str) -> str:
@@ -381,21 +382,22 @@ def render(config):
 
     # ---- Quartier & transports (Slide 4) ----
     st.subheader("Quartier & Transports (Slide 4)")
-    radius_default_raw = st.session_state.get("radius_m", DEFAULT_RADIUS_M)
+    radius_default_raw = st.session_state.get(POI_RADIUS_KEY, st.session_state.get("radius_m", DEFAULT_RADIUS_M))
     try:
         radius_default = int(radius_default_raw)
     except (TypeError, ValueError):
         radius_default = DEFAULT_RADIUS_M
-        st.session_state["radius_m"] = DEFAULT_RADIUS_M
+        st.session_state[POI_RADIUS_KEY] = DEFAULT_RADIUS_M
     st.slider(
         "Rayon (m)",
         min_value=300,
         max_value=3000,
         value=radius_default,
         step=100,
-        key="radius_m",
+        key=POI_RADIUS_KEY,
         help="Distance utilisée pour les lieux et transports.",
     )
+    st.session_state["radius_m"] = st.session_state.get(POI_RADIUS_KEY, DEFAULT_RADIUS_M)
     migrate_quartier_transport_session(st.session_state)
     for key in QUARTIER_TRANSPORT_SESSION_KEYS:
         st.session_state.setdefault(key, "")
@@ -487,7 +489,7 @@ def render(config):
                 start_tr = perf_counter()
                 with st.spinner("Chargement des transports…"):
                     try:
-                        radius_raw = st.session_state.get("radius_m", DEFAULT_RADIUS_M)
+                        radius_raw = st.session_state.get(POI_RADIUS_KEY, DEFAULT_RADIUS_M)
                         try:
                             radius = int(radius_raw)
                         except (TypeError, ValueError):
@@ -547,11 +549,12 @@ def render(config):
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
     st.caption(f"POI providers : {_compact_provider_status()}")
-    radius_raw = st.session_state.get("radius_m", DEFAULT_RADIUS_M)
+    radius_raw = st.session_state.get(POI_RADIUS_KEY, DEFAULT_RADIUS_M)
     try:
         radius_m = int(radius_raw)
     except (TypeError, ValueError):
         radius_m = DEFAULT_RADIUS_M
+    st.caption(f"Rayon appliqué: {radius_m} m")
 
     address_raw = (st.session_state.get("bien_addr", "") or "").strip()
     normalized_address = normalize_address(address_raw)
@@ -643,6 +646,13 @@ def render(config):
         visits_items = poi_results.get("visits", [])
         if not poi_provider:
             poi_provider = _resolve_poi_provider(poi_results)
+
+    if poi_attempted and (len(spots_items) < 2 or len(visits_items) < 2):
+        suggested = min(radius_m * 2, 3000)
+        if suggested > radius_m:
+            st.info(f"Peu de résultats dans {radius_m} m, essayez {suggested} m.")
+        else:
+            st.info(f"Peu de résultats dans {radius_m} m, essayez d'augmenter le rayon.")
 
     if run_report.provider_warnings:
         st.warning(" / ".join(run_report.provider_warnings[-2:]))

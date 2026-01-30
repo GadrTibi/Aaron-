@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Dict, Iterable, List
 
@@ -66,6 +67,70 @@ def _to_result(name: str, distance: float | None, provider: str, raw: object) ->
     return POIResult(name=name or "Lieu", distance_m=distance if distance is not None else None, provider=provider, raw=raw)
 
 
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6371000.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return 2 * radius * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _extract_lat_lon(raw: object) -> tuple[float | None, float | None]:
+    if raw is None:
+        return None, None
+    for attr in ("lat", "latitude"):
+        if hasattr(raw, attr):
+            lat_val = getattr(raw, attr)
+            if lat_val is not None:
+                lat = float(lat_val)
+                break
+    else:
+        lat = None
+    for attr in ("lon", "longitude"):
+        if hasattr(raw, attr):
+            lon_val = getattr(raw, attr)
+            if lon_val is not None:
+                lon = float(lon_val)
+                break
+    else:
+        lon = None
+    if lat is not None and lon is not None:
+        return lat, lon
+    if isinstance(raw, dict):
+        lat_val = raw.get("lat") or raw.get("latitude")
+        lon_val = raw.get("lon") or raw.get("longitude")
+        try:
+            return float(lat_val), float(lon_val)
+        except (TypeError, ValueError):
+            return None, None
+    return None, None
+
+
+def filter_poi_results(
+    lat: float,
+    lon: float,
+    radius_m: int,
+    results: Dict[str, List[POIResult]],
+) -> Dict[str, List[POIResult]]:
+    filtered: Dict[str, List[POIResult]] = {}
+    for category, items in results.items():
+        kept: List[POIResult] = []
+        for item in items:
+            distance = item.distance_m
+            if distance is None:
+                lat_val, lon_val = _extract_lat_lon(item.raw)
+                if lat_val is None or lon_val is None:
+                    continue
+                distance = _haversine_m(lat, lon, lat_val, lon_val)
+            if distance <= radius_m:
+                if item.distance_m is None:
+                    item = POIResult(name=item.name, distance_m=distance, provider=item.provider, raw=item.raw)
+                kept.append(item)
+        kept.sort(key=lambda entry: entry.distance_m if entry.distance_m is not None else float("inf"))
+        filtered[category] = kept
+    return filtered
+
+
 def _provider_order(custom: Iterable[str] | None) -> List[str]:
     if custom:
         return [p.lower() for p in custom]
@@ -105,7 +170,7 @@ def get_pois(
             try:
                 g_key, _ = resolve_google_key()
                 service = GooglePlacesService(g_key)
-                results = _map_google(service, lat, lon, radius_m, cats)
+                results = filter_poi_results(lat, lon, radius_m, _map_google(service, lat, lon, radius_m, cats))
             except Exception as exc:
                 rep.add_provider_warning(f"Google Places indisponible: {exc}")
                 continue
@@ -120,7 +185,7 @@ def get_pois(
             try:
                 g_key, _ = resolve_geoapify_key()
                 service = GeoapifyPlacesService(api_key=g_key)
-                results = _map_geoapify(service, lat, lon, radius_m, cats)
+                results = filter_poi_results(lat, lon, radius_m, _map_geoapify(service, lat, lon, radius_m, cats))
             except Exception as exc:
                 rep.add_provider_warning(f"Geoapify indisponible: {exc}")
                 continue
@@ -136,7 +201,7 @@ def get_pois(
             try:
                 otm_key, _ = resolve_opentripmap_key()
                 service = OpenTripMapService(api_key=otm_key)
-                results = _map_otm(service, lat, lon, radius_m, cats)
+                results = filter_poi_results(lat, lon, radius_m, _map_otm(service, lat, lon, radius_m, cats))
             except Exception as exc:
                 rep.add_provider_warning(f"OpenTripMap indisponible: {exc}")
                 continue
@@ -149,7 +214,7 @@ def get_pois(
         if provider_key == "wikimedia":
             try:
                 service = WikiPOIService()
-                results = _map_wiki(service, lat, lon, radius_m, cats)
+                results = filter_poi_results(lat, lon, radius_m, _map_wiki(service, lat, lon, radius_m, cats))
             except Exception as exc:
                 rep.add_provider_warning(f"Wikimedia POI indisponible: {exc}")
                 continue
@@ -161,6 +226,27 @@ def get_pois(
 
     rep.add_provider_warning("Aucun provider POI disponible ou résultats vides.", blocking=True)
     return {cat: [] for cat in cats}
+
+
+def build_spots_and_visits(
+    lat: float,
+    lon: float,
+    radius_m: int,
+    report: GenerationReport | None = None,
+    preferred_order: Iterable[str] | None = None,
+) -> Dict[str, List[POIResult]]:
+    results = get_pois(
+        lat=lat,
+        lon=lon,
+        radius_m=radius_m,
+        categories=("spots", "visits"),
+        report=report,
+        preferred_order=preferred_order,
+    )
+    return {
+        "spots": results.get("spots", []),
+        "visits": results.get("visits", []),
+    }
 
 
 def resolve_google_key() -> tuple[str, str]:
@@ -181,4 +267,4 @@ def resolve_opentripmap_key() -> tuple[str, str]:
     return resolve_api_key("OPENTRIPMAP_API_KEY")
 
 
-__all__ = ["get_pois", "POIResult"]
+__all__ = ["build_spots_and_visits", "filter_poi_results", "get_pois", "POIResult"]
