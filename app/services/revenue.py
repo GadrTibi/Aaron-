@@ -43,10 +43,10 @@ def compute_revenue(
 ):
     estimation_type = (estimation_type or "CD").upper()
     if estimation_type == "MD":
-        jours_occupes = float(ESTIMATION_DAYS_PER_MONTH_MD)
+        jours_occupes = float(days_per_month)
         revenu_brut = round(inp.prix_nuitee * jours_occupes)
-        platform_fee_pct = ESTIMATION_PLATFORM_FEE_PCT_MD
-        mfy_commission_pct = ESTIMATION_MFY_COMMISSION_PCT_MD
+        platform_fee_pct = inp.platform_fee_pct
+        mfy_commission_pct = inp.mfy_commission_pct
     else:
         jours_occupes = float(days_per_month) * (inp.taux_occupation_pct / 100.0)
         revenu_brut = round(inp.prix_nuitee * jours_occupes)

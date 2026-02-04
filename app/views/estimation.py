@@ -848,11 +848,14 @@ def render(config):
     default_mfy_commission = float(st.session_state.get("mfy_commission_pct", st.session_state.get("rn_comm", 20.0)))
 
     if estimation_type == "MD":
-        st.session_state["rn_occ"] = ESTIMATION_TAUX_OCCUPATION_PCT_MD
-        st.session_state["platform_fee_pct"] = ESTIMATION_PLATFORM_FEE_PCT_MD
-        st.session_state["mfy_commission_pct"] = ESTIMATION_MFY_COMMISSION_PCT_MD
+        st.session_state.setdefault("rn_occ", ESTIMATION_TAUX_OCCUPATION_PCT_MD)
+        st.session_state.setdefault("md_days_per_month", ESTIMATION_DAYS_PER_MONTH_MD)
+        st.session_state.setdefault("platform_fee_pct", ESTIMATION_PLATFORM_FEE_PCT_MD)
+        st.session_state.setdefault("mfy_commission_pct", ESTIMATION_MFY_COMMISSION_PCT_MD)
+    else:
+        st.session_state.setdefault("rn_occ", 70)
 
-    colA, colB, colC, colD = st.columns(4)
+    colA, colB, colC, colD, colE = st.columns(5)
     with colA:
         prix_nuitee = st.number_input("Prix par nuitée (€)", min_value=0.0, value=120.0, step=5.0, key="rn_prix")
     with colB:
@@ -860,10 +863,8 @@ def render(config):
             "Taux d'occupation (%)",
             min_value=0,
             max_value=100,
-            value=70,
             step=1,
             key="rn_occ",
-            disabled=estimation_type == "MD",
         )
     with colC:
         platform_fee_pct = st.number_input(
@@ -873,7 +874,6 @@ def render(config):
             value=default_platform_fee,
             step=1.0,
             key="platform_fee_pct",
-            disabled=estimation_type == "MD",
         )
     with colD:
         mfy_commission_pct = st.slider(
@@ -883,50 +883,58 @@ def render(config):
             value=float(default_mfy_commission),
             step=1.0,
             key="mfy_commission_pct",
-            disabled=estimation_type == "MD",
         )
+    with colE:
+        if estimation_type == "MD":
+            days_per_month = st.number_input(
+                "Jours loués / mois",
+                min_value=0,
+                max_value=31,
+                value=int(st.session_state.get("md_days_per_month", ESTIMATION_DAYS_PER_MONTH_MD)),
+                step=1,
+                key="md_days_per_month",
+            )
+        else:
+            days_per_month = ESTIMATION_DAYS_PER_MONTH_CD
     st.session_state["rn_comm"] = float(mfy_commission_pct)
 
     st.markdown("**Scénarios de prix (nuitée)**")
     if estimation_type == "MD":
-        coef_pess = 0.93
-        coef_cible = 1.00
-        coef_opt = 1.06
-        st.caption("Mode MD : coefficients fixes (0.93 / 1.00 / 1.06).")
+        default_coef_pess = 0.93
+        default_coef_cible = 1.00
+        default_coef_opt = 1.06
     else:
         default_coef_pess = 0.88
         default_coef_cible = 1.00
         default_coef_opt = 1.15
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            coef_pess = st.number_input(
-                "Coef pessimiste",
-                min_value=0.5,
-                max_value=2.0,
-                value=default_coef_pess,
-                step=0.05,
-                key="sc_p",
-            )
-        with c2:
-            coef_cible = st.number_input(
-                "Coef cible",
-                min_value=0.5,
-                max_value=2.0,
-                value=default_coef_cible,
-                step=0.05,
-                key="sc_c",
-            )
-        with c3:
-            coef_opt = st.number_input(
-                "Coef optimiste",
-                min_value=0.5,
-                max_value=2.0,
-                value=default_coef_opt,
-                step=0.05,
-                key="sc_o",
-            )
-
-    days_per_month = ESTIMATION_DAYS_PER_MONTH_CD if estimation_type == "CD" else ESTIMATION_DAYS_PER_MONTH_MD
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        coef_pess = st.number_input(
+            "Coef pessimiste",
+            min_value=0.5,
+            max_value=2.0,
+            value=default_coef_pess,
+            step=0.05,
+            key="sc_p",
+        )
+    with c2:
+        coef_cible = st.number_input(
+            "Coef cible",
+            min_value=0.5,
+            max_value=2.0,
+            value=default_coef_cible,
+            step=0.05,
+            key="sc_c",
+        )
+    with c3:
+        coef_opt = st.number_input(
+            "Coef optimiste",
+            min_value=0.5,
+            max_value=2.0,
+            value=default_coef_opt,
+            step=0.05,
+            key="sc_o",
+        )
 
     calc = compute_revenue(RevenueInputs(
         prix_nuitee=float(prix_nuitee),
@@ -948,7 +956,7 @@ def render(config):
 
     revenue_mapping = build_revenue_token_mapping(calc)
     jours_occ_30_num = (
-        ESTIMATION_DAYS_PER_MONTH_MD
+        days_per_month
         if estimation_type == "MD"
         else math.floor(days_occupied_on_30(float(taux_occupation)))
     )
@@ -1087,14 +1095,14 @@ def render(config):
     if estimation_type == "MD":
         mapping.update(
             {
-                "[[TAUX_OCC]]": f"{int(ESTIMATION_TAUX_OCCUPATION_PCT_MD)}%",
-                "[[JOURS_OCC_30]]": str(int(ESTIMATION_DAYS_PER_MONTH_MD)),
+                "[[TAUX_OCC]]": f"{int(taux_occupation)}%",
+                "[[JOURS_OCC_30]]": str(int(days_per_month)),
                 "[[PRIX_NUIT]]": f"{prix_nuitee:.0f}€",
                 "[[REV_BRUT]]": _format_eur_dot(REV_BRUT),
                 "[[FRAIS_GEN]]": _format_eur_dot(FRAIS_GEN),
-                "[[PLATFORM_FEE_PCT]]": str(int(ESTIMATION_PLATFORM_FEE_PCT_MD)),
+                "[[PLATFORM_FEE_PCT]]": str(int(platform_fee_pct)),
                 "[[PLATFORM_FEE_EUR]]": _format_eur_dot(PLATFORM_FEE_EUR),
-                "[[MFY_COMMISSION_PCT]]": str(int(ESTIMATION_MFY_COMMISSION_PCT_MD)),
+                "[[MFY_COMMISSION_PCT]]": str(int(mfy_commission_pct)),
                 "[[MFY_COMMISSION_EUR]]": _format_eur_dot(MFY_COMMISSION_EUR),
                 "[[PRIX_PESSIMISTE]]": _format_eur_space_no_gap(PRIX_PESS),
                 "[[PRIX_CIBLE]]": _format_eur_space_no_gap(PRIX_CIBLE),
