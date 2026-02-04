@@ -8,7 +8,6 @@ def test_estimation_mapping_has_fee_tokens():
             taux_occupation_pct=60,
             platform_fee_pct=15,
             mfy_commission_pct=20,
-            frais_menage_mensuels=35,
         )
     )
 
@@ -17,7 +16,6 @@ def test_estimation_mapping_has_fee_tokens():
     expected_tokens = [
         "[[PLATFORM_FEE_PCT]]",
         "[[PLATFORM_FEE_EUR]]",
-        "[[CLEANING_FEE_EUR]]",
         "[[MFY_COMMISSION_PCT]]",
         "[[MFY_COMMISSION_EUR]]",
     ]

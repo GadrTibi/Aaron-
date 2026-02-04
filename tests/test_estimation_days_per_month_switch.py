@@ -23,7 +23,6 @@ def test_days_per_month_applies_to_revenue(estimation_type, days_per_month):
             taux_occupation_pct=100.0,
             platform_fee_pct=0.0,
             mfy_commission_pct=0.0,
-            frais_menage_mensuels=0.0,
         ),
         days_per_month=days_per_month,
     )

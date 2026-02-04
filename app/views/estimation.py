@@ -37,6 +37,7 @@ from app.services.revenue import (
     ESTIMATION_DAYS_PER_MONTH_MD,
     RevenueInputs,
     build_revenue_token_mapping,
+    compute_prix_cible,
     compute_revenue,
 )
 from app.services.template_catalog import list_effective_estimation_templates
@@ -831,9 +832,8 @@ def render(config):
     st.subheader("Paramètres revenus")
     default_platform_fee = float(st.session_state.get("platform_fee_pct", 15.0))
     default_mfy_commission = float(st.session_state.get("mfy_commission_pct", st.session_state.get("rn_comm", 20.0)))
-    default_cleaning_fee = float(st.session_state.get("cleaning_fee_eur", st.session_state.get("rn_menage", 0.0)))
 
-    colA, colB, colC, colD, colE = st.columns(5)
+    colA, colB, colC, colD = st.columns(4)
     with colA:
         prix_nuitee = st.number_input("Prix par nuitée (€)", min_value=0.0, value=120.0, step=5.0, key="rn_prix")
     with colB:
@@ -846,11 +846,6 @@ def render(config):
         mfy_commission_pct = st.slider(
             "Commission MFY (%)", min_value=0.0, max_value=50.0, value=float(default_mfy_commission), step=1.0, key="mfy_commission_pct"
         )
-    with colE:
-        cleaning_fee_eur = st.number_input(
-            "Frais de ménage (mensuels, €)", min_value=0.0, value=default_cleaning_fee, step=5.0, key="cleaning_fee_eur"
-        )
-        st.session_state["rn_menage"] = cleaning_fee_eur
     st.session_state["rn_comm"] = float(mfy_commission_pct)
 
     st.markdown("**Scénarios de prix (nuitée)**")
@@ -869,7 +864,6 @@ def render(config):
         taux_occupation_pct=float(taux_occupation),
         platform_fee_pct=float(platform_fee_pct),
         mfy_commission_pct=float(mfy_commission_pct),
-        frais_menage_mensuels=float(cleaning_fee_eur),
     ), days_per_month=days_per_month)
 
     REV_BRUT = calc["revenu_brut"]
@@ -881,7 +875,6 @@ def render(config):
     BASE_COMMISSION = calc["base_commission"]
     MFY_COMMISSION_PCT = calc["mfy_commission_pct"]
     MFY_COMMISSION_EUR = calc["mfy_commission_eur"]
-    CLEANING_FEE_EUR = calc["cleaning_fee_eur"]
 
     revenue_mapping = build_revenue_token_mapping(calc)
     jours_occ_30_num = (
@@ -909,7 +902,6 @@ def render(config):
             "base_commission": BASE_COMMISSION,
             "mfy_commission_pct": MFY_COMMISSION_PCT,
             "mfy_commission_eur": MFY_COMMISSION_EUR,
-            "cleaning_fee_eur": CLEANING_FEE_EUR,
             "taux_occ_pct": float(taux_occupation),
             "jours_occ_30_num": jours_occ_30_num,
             "jours_occ_30_mapping": jours_occ_30_mapping.get("[[JOURS_OCC_30]]"),
@@ -918,7 +910,7 @@ def render(config):
 
     # Scénarios prix
     PRIX_PESS = prix_nuitee * coef_pess
-    PRIX_CIBLE = prix_nuitee * coef_cible
+    PRIX_CIBLE = compute_prix_cible(REV_BRUT, PLATFORM_FEE_EUR, MFY_COMMISSION_EUR)
     PRIX_OPT = prix_nuitee * coef_opt
 
     st.markdown("**Évo du prix/nuitée**")

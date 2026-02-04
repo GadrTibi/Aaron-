@@ -12,7 +12,6 @@ class RevenueInputs:
     taux_occupation_pct: float
     platform_fee_pct: float
     mfy_commission_pct: float
-    frais_menage_mensuels: float
 
 
 def format_eur(value: float) -> str:
@@ -29,12 +28,11 @@ def compute_revenue(inp: RevenueInputs, *, days_per_month: float = 30.0):
     jours_occupes = float(days_per_month) * (inp.taux_occupation_pct / 100.0)
     revenu_brut = inp.prix_nuitee * jours_occupes
 
-    platform_fee_eur = revenu_brut * (inp.platform_fee_pct / 100.0)
+    platform_fee_eur = round(revenu_brut * (inp.platform_fee_pct / 100.0))
     base_commission = max(revenu_brut - platform_fee_eur, 0.0)
-    mfy_commission_eur = base_commission * (inp.mfy_commission_pct / 100.0)
-    cleaning_fee_eur = inp.frais_menage_mensuels
+    mfy_commission_eur = round(base_commission * (inp.mfy_commission_pct / 100.0))
 
-    frais_generaux = platform_fee_eur + mfy_commission_eur + cleaning_fee_eur
+    frais_generaux = platform_fee_eur + mfy_commission_eur
     revenu_net = max(revenu_brut - frais_generaux, 0.0)
     return {
         "jours_occupes": jours_occupes,
@@ -46,8 +44,11 @@ def compute_revenue(inp: RevenueInputs, *, days_per_month: float = 30.0):
         "base_commission": base_commission,
         "mfy_commission_pct": inp.mfy_commission_pct,
         "mfy_commission_eur": mfy_commission_eur,
-        "cleaning_fee_eur": cleaning_fee_eur,
     }
+
+
+def compute_prix_cible(revenu_brut: float, platform_fee_eur: float, mfy_commission_eur: float) -> float:
+    return round(revenu_brut - platform_fee_eur - mfy_commission_eur)
 
 
 def build_revenue_token_mapping(calc: Mapping[str, float]) -> dict[str, str]:
@@ -57,7 +58,6 @@ def build_revenue_token_mapping(calc: Mapping[str, float]) -> dict[str, str]:
     jours_occupes = float(calc.get("jours_occupes", 0.0))
     platform_fee_pct = float(calc.get("platform_fee_pct", 0.0))
     platform_fee_eur = float(calc.get("platform_fee_eur", 0.0))
-    cleaning_fee_eur = float(calc.get("cleaning_fee_eur", 0.0))
     mfy_commission_pct = float(calc.get("mfy_commission_pct", 0.0))
     mfy_commission_eur = float(calc.get("mfy_commission_eur", 0.0))
 
@@ -68,7 +68,6 @@ def build_revenue_token_mapping(calc: Mapping[str, float]) -> dict[str, str]:
         "[[JOURS_OCC]]": f"{jours_occupes:.1f} j",
         "[[PLATFORM_FEE_PCT]]": _format_pct(platform_fee_pct),
         "[[PLATFORM_FEE_EUR]]": format_eur(platform_fee_eur),
-        "[[CLEANING_FEE_EUR]]": format_eur(cleaning_fee_eur),
         "[[MFY_COMMISSION_PCT]]": _format_pct(mfy_commission_pct),
         "[[MFY_COMMISSION_EUR]]": format_eur(mfy_commission_eur),
     }
