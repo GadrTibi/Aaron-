@@ -25,6 +25,7 @@ def test_days_per_month_applies_to_revenue(estimation_type, days_per_month):
             mfy_commission_pct=0.0,
         ),
         days_per_month=days_per_month,
+        estimation_type=estimation_type,
     )
 
     assert calc["jours_occupes"] == pytest.approx(days_per_month)

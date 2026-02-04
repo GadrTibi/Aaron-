@@ -4,6 +4,9 @@ from typing import Mapping
 
 ESTIMATION_DAYS_PER_MONTH_CD = 30.46
 ESTIMATION_DAYS_PER_MONTH_MD = 26.0
+ESTIMATION_TAUX_OCCUPATION_PCT_MD = 83.0
+ESTIMATION_PLATFORM_FEE_PCT_MD = 15.0
+ESTIMATION_MFY_COMMISSION_PCT_MD = 15.0
 
 
 @dataclass
@@ -28,13 +31,31 @@ def round_to_50(value: float) -> float:
     return round(float(value) / 50.0) * 50.0
 
 
-def compute_revenue(inp: RevenueInputs, *, days_per_month: float = 30.0):
-    jours_occupes = float(days_per_month) * (inp.taux_occupation_pct / 100.0)
-    revenu_brut = round(inp.prix_nuitee * jours_occupes)
+def round_to_50_down(value: float) -> float:
+    return (float(value) // 50.0) * 50.0
 
-    platform_fee_eur = round(revenu_brut * (inp.platform_fee_pct / 100.0))
+
+def compute_revenue(
+    inp: RevenueInputs,
+    *,
+    days_per_month: float = 30.0,
+    estimation_type: str = "CD",
+):
+    estimation_type = (estimation_type or "CD").upper()
+    if estimation_type == "MD":
+        jours_occupes = float(ESTIMATION_DAYS_PER_MONTH_MD)
+        revenu_brut = round(inp.prix_nuitee * jours_occupes)
+        platform_fee_pct = ESTIMATION_PLATFORM_FEE_PCT_MD
+        mfy_commission_pct = ESTIMATION_MFY_COMMISSION_PCT_MD
+    else:
+        jours_occupes = float(days_per_month) * (inp.taux_occupation_pct / 100.0)
+        revenu_brut = round(inp.prix_nuitee * jours_occupes)
+        platform_fee_pct = inp.platform_fee_pct
+        mfy_commission_pct = inp.mfy_commission_pct
+
+    platform_fee_eur = round(revenu_brut * (platform_fee_pct / 100.0))
     base_commission = max(revenu_brut - platform_fee_eur, 0.0)
-    mfy_commission_eur = round(base_commission * (inp.mfy_commission_pct / 100.0))
+    mfy_commission_eur = round(base_commission * (mfy_commission_pct / 100.0))
 
     frais_generaux = platform_fee_eur + mfy_commission_eur
     base_estimation = revenu_brut - platform_fee_eur - mfy_commission_eur
@@ -45,10 +66,10 @@ def compute_revenue(inp: RevenueInputs, *, days_per_month: float = 30.0):
         "frais_generaux": frais_generaux,
         "base_estimation": base_estimation,
         "revenu_net": revenu_net,
-        "platform_fee_pct": inp.platform_fee_pct,
+        "platform_fee_pct": platform_fee_pct,
         "platform_fee_eur": platform_fee_eur,
         "base_commission": base_commission,
-        "mfy_commission_pct": inp.mfy_commission_pct,
+        "mfy_commission_pct": mfy_commission_pct,
         "mfy_commission_eur": mfy_commission_eur,
     }
 
