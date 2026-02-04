@@ -28,4 +28,4 @@ def test_days_per_month_applies_to_revenue(estimation_type, days_per_month):
     )
 
     assert calc["jours_occupes"] == pytest.approx(days_per_month)
-    assert calc["revenu_brut"] == pytest.approx(base_price * days_per_month)
+    assert calc["revenu_brut"] == round(base_price * days_per_month)

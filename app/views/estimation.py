@@ -1,3 +1,4 @@
+import math
 import os
 from pathlib import Path
 from time import perf_counter
@@ -39,6 +40,7 @@ from app.services.revenue import (
     build_revenue_token_mapping,
     compute_prix_cible,
     compute_revenue,
+    round_to_50,
 )
 from app.services.template_catalog import list_effective_estimation_templates
 from app.services.template_validation import validate_pptx_template
@@ -849,13 +851,37 @@ def render(config):
     st.session_state["rn_comm"] = float(mfy_commission_pct)
 
     st.markdown("**Scénarios de prix (nuitée)**")
+    default_coef_pess = 0.88 if estimation_type == "CD" else 0.90
+    default_coef_cible = 1.00
+    default_coef_opt = 1.15 if estimation_type == "CD" else 1.10
     c1, c2, c3 = st.columns(3)
     with c1:
-        coef_pess = st.number_input("Coef pessimiste", min_value=0.5, max_value=2.0, value=0.90, step=0.05, key="sc_p")
+        coef_pess = st.number_input(
+            "Coef pessimiste",
+            min_value=0.5,
+            max_value=2.0,
+            value=default_coef_pess,
+            step=0.05,
+            key="sc_p",
+        )
     with c2:
-        coef_cible = st.number_input("Coef cible", min_value=0.5, max_value=2.0, value=1.00, step=0.05, key="sc_c")
+        coef_cible = st.number_input(
+            "Coef cible",
+            min_value=0.5,
+            max_value=2.0,
+            value=default_coef_cible,
+            step=0.05,
+            key="sc_c",
+        )
     with c3:
-        coef_opt = st.number_input("Coef optimiste", min_value=0.5, max_value=2.0, value=1.10, step=0.05, key="sc_o")
+        coef_opt = st.number_input(
+            "Coef optimiste",
+            min_value=0.5,
+            max_value=2.0,
+            value=default_coef_opt,
+            step=0.05,
+            key="sc_o",
+        )
 
     days_per_month = ESTIMATION_DAYS_PER_MONTH_CD if estimation_type == "CD" else ESTIMATION_DAYS_PER_MONTH_MD
 
@@ -875,12 +901,13 @@ def render(config):
     BASE_COMMISSION = calc["base_commission"]
     MFY_COMMISSION_PCT = calc["mfy_commission_pct"]
     MFY_COMMISSION_EUR = calc["mfy_commission_eur"]
+    BASE_ESTIMATION = calc["base_estimation"]
 
     revenue_mapping = build_revenue_token_mapping(calc)
     jours_occ_30_num = (
         ESTIMATION_DAYS_PER_MONTH_MD
         if estimation_type == "MD"
-        else days_occupied_on_30(float(taux_occupation))
+        else math.floor(days_occupied_on_30(float(taux_occupation)))
     )
     jours_occ_30_mapping = build_jours_occ_30_mapping(
         float(taux_occupation),
@@ -888,7 +915,12 @@ def render(config):
         include_unit=False,
     )
 
-    st.metric("Jours loués / mois", f"{JOURS_OCC:.1f} j")
+    jours_loues_ui = (
+        days_occupied_on_30(float(taux_occupation))
+        if estimation_type == "CD"
+        else JOURS_OCC
+    )
+    st.metric("Jours loués / mois", f"{jours_loues_ui:.1f} j")
     colX, colY, colZ = st.columns(3)
     colX.metric("Revenu brut", f"{REV_BRUT:.0f} €")
     colY.metric("Frais généraux", f"{FRAIS_GEN:.0f} €")
@@ -909,9 +941,15 @@ def render(config):
         st.json(revenue_mapping)
 
     # Scénarios prix
-    PRIX_PESS = prix_nuitee * coef_pess
-    PRIX_CIBLE = compute_prix_cible(REV_BRUT, PLATFORM_FEE_EUR, MFY_COMMISSION_EUR)
-    PRIX_OPT = prix_nuitee * coef_opt
+    PRIX_PESS = round_to_50(BASE_ESTIMATION * coef_pess)
+    PRIX_CIBLE = round_to_50(compute_prix_cible(REV_BRUT, PLATFORM_FEE_EUR, MFY_COMMISSION_EUR) * coef_cible)
+    PRIX_OPT = round_to_50(BASE_ESTIMATION * coef_opt)
+
+    st.markdown("**Prix d'estimation**")
+    prix_col_1, prix_col_2, prix_col_3 = st.columns(3)
+    prix_col_1.metric("Prix pessimiste (€)", f"{PRIX_PESS:.0f} €")
+    prix_col_2.metric("Prix cible (€)", f"{PRIX_CIBLE:.0f} €")
+    prix_col_3.metric("Prix optimiste (€)", f"{PRIX_OPT:.0f} €")
 
     st.markdown("**Évo du prix/nuitée**")
     histo_col_btn, histo_col_preview = st.columns([1, 3])

@@ -48,4 +48,4 @@ def test_prix_cible_is_based_on_brut_minus_platform_and_commission(days_per_mont
         calc["mfy_commission_eur"],
     )
 
-    assert prix_cible == round(calc["revenu_brut"] - calc["platform_fee_eur"] - calc["mfy_commission_eur"])
+    assert prix_cible == calc["revenu_brut"] - calc["platform_fee_eur"] - calc["mfy_commission_eur"]

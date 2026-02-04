@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
-ESTIMATION_DAYS_PER_MONTH_CD = 30.0
+ESTIMATION_DAYS_PER_MONTH_CD = 30.46
 ESTIMATION_DAYS_PER_MONTH_MD = 26.0
 
 
@@ -24,20 +24,26 @@ def _format_pct(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
+def round_to_50(value: float) -> float:
+    return round(float(value) / 50.0) * 50.0
+
+
 def compute_revenue(inp: RevenueInputs, *, days_per_month: float = 30.0):
     jours_occupes = float(days_per_month) * (inp.taux_occupation_pct / 100.0)
-    revenu_brut = inp.prix_nuitee * jours_occupes
+    revenu_brut = round(inp.prix_nuitee * jours_occupes)
 
     platform_fee_eur = round(revenu_brut * (inp.platform_fee_pct / 100.0))
     base_commission = max(revenu_brut - platform_fee_eur, 0.0)
     mfy_commission_eur = round(base_commission * (inp.mfy_commission_pct / 100.0))
 
     frais_generaux = platform_fee_eur + mfy_commission_eur
+    base_estimation = revenu_brut - platform_fee_eur - mfy_commission_eur
     revenu_net = max(revenu_brut - frais_generaux, 0.0)
     return {
         "jours_occupes": jours_occupes,
         "revenu_brut": revenu_brut,
         "frais_generaux": frais_generaux,
+        "base_estimation": base_estimation,
         "revenu_net": revenu_net,
         "platform_fee_pct": inp.platform_fee_pct,
         "platform_fee_eur": platform_fee_eur,
@@ -48,7 +54,7 @@ def compute_revenue(inp: RevenueInputs, *, days_per_month: float = 30.0):
 
 
 def compute_prix_cible(revenu_brut: float, platform_fee_eur: float, mfy_commission_eur: float) -> float:
-    return round(revenu_brut - platform_fee_eur - mfy_commission_eur)
+    return revenu_brut - platform_fee_eur - mfy_commission_eur
 
 
 def build_revenue_token_mapping(calc: Mapping[str, float]) -> dict[str, str]:
