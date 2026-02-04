@@ -13,3 +13,17 @@ def test_md_mode_skips_histogram(monkeypatch):
 
     assert result is None
     assert called is False
+
+
+def test_cd_mode_builds_histogram():
+    called = False
+
+    def _return_path(_value):
+        nonlocal called
+        called = True
+        return "plot.png"
+
+    result = estimation.generate_estimation_histo_if_needed("CD", 120.0, build_func=_return_path)
+
+    assert result == "plot.png"
+    assert called is True

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
-ESTIMATION_DAYS_PER_MONTH_CD = 25.5
+ESTIMATION_DAYS_PER_MONTH_CD = 30.0
 ESTIMATION_DAYS_PER_MONTH_MD = 26.0
 
 

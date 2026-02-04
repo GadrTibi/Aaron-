@@ -18,7 +18,6 @@ from app.services.pptx_fill import generate_estimation_pptx
 from app.services.occupancy_utils import (
     build_jours_occ_30_mapping,
     days_occupied_on_30,
-    should_append_days_unit,
 )
 from app.services.pptx_requirements import (
     get_estimation_detectors,
@@ -885,15 +884,15 @@ def render(config):
     CLEANING_FEE_EUR = calc["cleaning_fee_eur"]
 
     revenue_mapping = build_revenue_token_mapping(calc)
-    jours_occ_30_num = days_occupied_on_30(float(taux_occupation))
-    append_days_unit, token_present = should_append_days_unit(
-        selected_template.path if selected_template else None,
+    jours_occ_30_num = (
+        ESTIMATION_DAYS_PER_MONTH_MD
+        if estimation_type == "MD"
+        else days_occupied_on_30(float(taux_occupation))
     )
-    if selected_template and not token_present:
-        run_report.add_note("Token [[JOURS_OCC_30]] absent du template")
     jours_occ_30_mapping = build_jours_occ_30_mapping(
         float(taux_occupation),
-        include_unit=append_days_unit,
+        days_value=jours_occ_30_num,
+        include_unit=False,
     )
 
     st.metric("Jours loués / mois", f"{JOURS_OCC:.1f} j")
@@ -998,8 +997,8 @@ def render(config):
         "[[CHALLENGE_2]]": st.session_state.get('ch2',''),
         "[[CHALLENGE_3]]": st.session_state.get('ch3',''),
         # Slide 6
-        "[[PRIX_NUIT]]": f"{st.session_state.get('rn_prix',0):.0f} €",
-        "[[TAUX_OCC]]": f"{st.session_state.get('rn_occ',0)} %",
+        "[[PRIX_NUIT]]": f"{st.session_state.get('rn_prix',0):.0f}€",
+        "[[TAUX_OCC]]": f"{st.session_state.get('rn_occ',0)}%",
         "[[PRIX_PESSIMISTE]]": f"{PRIX_PESS:.0f} €",
         "[[PRIX_CIBLE]]": f"{PRIX_CIBLE:.0f} €",
         "[[PRIX_OPTIMISTE]]": f"{PRIX_OPT:.0f} €",

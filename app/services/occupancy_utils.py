@@ -51,10 +51,11 @@ def should_append_days_unit(
 def build_jours_occ_30_mapping(
     taux_occ_pct: float,
     *,
+    days_value: float | None = None,
     include_unit: bool = True,
     use_comma: bool = False,
 ) -> dict[str, str]:
-    days_num = days_occupied_on_30(taux_occ_pct)
+    days_num = days_occupied_on_30(taux_occ_pct) if days_value is None else float(days_value)
     days_str = format_days(days_num, use_comma=use_comma)
     value = f"{days_str} j" if include_unit else days_str
     return {"[[JOURS_OCC_30]]": value}
