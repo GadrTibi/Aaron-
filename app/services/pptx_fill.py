@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List
 from urllib.parse import quote_plus
 
 from pptx import Presentation
@@ -66,56 +66,29 @@ def insert_plot_into_pptx(template_path: str, output_path: str, image_path: str,
     LOGGER.info("Histogramme inséré dans la slide 6 (%s)", getattr(target_shape, "name", ""))
     prs.save(output_path)
 
-def _rebuild_index(paragraph) -> tuple[str, list[tuple[int,int]]]:
-    segs, parts = [], []
-    for i, r in enumerate(paragraph.runs):
-        t = r.text or ""
-        parts.append(t)
-        segs.append((i, len(t)))
-    return ("".join(parts), segs)
-
-def _locate_in_runs(segs, start_pos: int, end_pos: int):
-    pos = 0
-    s_run = s_off = e_run = e_off = 0
-    for idx, ln in segs:
-        if start_pos >= pos and start_pos <= pos + ln:
-            s_run = idx; s_off = start_pos - pos; break
-        pos += ln
-    pos = 0
-    for idx, ln in segs:
-        if end_pos > pos and end_pos <= pos + ln:
-            e_run = idx; e_off = end_pos - pos; break
-        pos += ln
-    return s_run, s_off, e_run, e_off
-
-def _replace_token_in_paragraph(paragraph, token: str, value: str) -> bool:
-    changed = False
-    while True:
-        combined, segs = _rebuild_index(paragraph)
-        idx = combined.find(token)
-        if idx < 0: break
-        start, end = idx, idx + len(token)
-        s_run, s_off, e_run, e_off = _locate_in_runs(segs, start, end)
-        style_run = paragraph.runs[s_run]
-
-        pre = style_run.text[:s_off]
-        style_run.text = pre + value
-
-        for ridx in range(s_run + 1, e_run):
-            paragraph.runs[ridx].text = ""
-        if e_run != s_run:
-            last = paragraph.runs[e_run]
-            suffix = last.text[e_off:]
-            last.text = suffix
-        changed = True
-    return changed
+def replace_tokens_in_paragraph(paragraph, mapping: Dict[str, str]) -> bool:
+    runs = paragraph.runs
+    if not runs:
+        return False
+    full = "".join(r.text for r in runs)
+    if "[[" not in full:
+        return False
+    new = full
+    for token, value in mapping.items():
+        if token in new:
+            new = new.replace(token, str(value))
+    if new == full:
+        return False
+    runs[0].text = new
+    for run in runs[1:]:
+        run.text = ""
+    return True
 
 def replace_text_preserving_style(shapes, mapping: Dict[str, str]) -> None:
     for shape in walk_pptx_shapes(shapes):
         if hasattr(shape, "text_frame") and shape.text_frame:
             for para in shape.text_frame.paragraphs:
-                for token, value in mapping.items():
-                    _replace_token_in_paragraph(para, token, value)
+                replace_tokens_in_paragraph(para, mapping)
 
 def insert_image(slide, image_path: str, left=Inches(1), top=Inches(3), width=Inches(8)) -> None:
     slide.shapes.add_picture(image_path, left, top, width=width)
