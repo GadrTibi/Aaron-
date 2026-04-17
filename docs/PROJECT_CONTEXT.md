@@ -21,7 +21,7 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
 - **Estimation** : collecte des données POI/visites, calcule revenus, génère le PPTX d’estimation avec graphique et images (POI + carte). 【app/views/estimation.py†L90-L320】
 - **Mandat** : réutilise les données générales, ajoute les champs mandat et génère le DOCX. 【app/views/mandat.py†L17-L89】
 - **Book** : guide d’accès locataire (transports, instructions d’accès, Wi‑Fi, photos d’accès, carte) puis génère PPTX ou PDF léger. 【app/views/book.py†L1-L165】
-- **Paramètres / Clés API** : saisie persistante de `GOOGLE_MAPS_API_KEY` via `~/.mfy_local_app/secrets.toml` ou récupération depuis l’environnement/`st.secrets`. 【app/views/settings_keys.py†L1-L85】
+- **Paramètres / Clés API** : saisie persistante de `GOOGLE_MAPS_API_KEY` et `OPENAI_API_KEY` via `~/.mfy_local_app/secrets.toml` (local), test de clé OpenAI et suppression ciblée de la clé locale, avec récupération prioritaire depuis l’environnement/`st.secrets`. 【app/views/settings_keys.py†L1-L187】
 
 ## Flux de bout en bout
 - **Estimation → PPTX**
@@ -75,6 +75,13 @@ Outil Streamlit local permettant de générer trois livrables immobiliers : un
 3. Fichiers `secrets.toml` aux emplacements : `~/.mfy_local_app/secrets.toml`, `.streamlit/secrets.toml`, `app/.streamlit/secrets.toml`. 【app/views/settings_keys.py†L17-L55】
 4. UI “Paramètres / Clés API” écrit dans `~/.mfy_local_app/secrets.toml`.
 5. Pour certains services : fallback à valeurs vides → fonctionnalités limitées (ex. Google Places/Unsplash/Pexels). 【services/places_google.py†L6-L25】【app/services/image_fetcher.py†L85-L142】
+
+### OpenAI : mise à jour / suppression / cloud
+- **Saisie** : page *Paramètres / Clés API* → section **OpenAI** (champ masqué, option afficher/masquer, warning format non bloquant si préfixe inattendu).
+- **Enregistrement local** : bouton **Enregistrer localement** écrit uniquement dans `~/.mfy_local_app/secrets.toml` (permissions 600 en local POSIX quand possible).
+- **Test de clé** : bouton **Tester la clé** réalise un appel léger OpenAI et affiche `Clé valide` ou un message court d’erreur sans fuite de secret.
+- **Suppression** : bouton **Supprimer la clé locale** retire uniquement `OPENAI_API_KEY` du fichier local et conserve les autres secrets.
+- **Streamlit Community Cloud** : la persistance durable côté serveur se fait via **Settings > Secrets** (`st.secrets` en lecture) ; l’écriture locale disque peut être éphémère après redéploiement.
 
 ## Stratégie de cache
 - **Streamlit** : `@st.cache_data` sur `list_templates` (TTL 5 s) et `_load_google_places` (TTL 120 s). 【app/views/utils.py†L9-L21】【app/views/estimation.py†L15-L31】

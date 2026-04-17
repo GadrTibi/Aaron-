@@ -57,10 +57,79 @@ def _streamlit_secrets() -> Dict[str, str]:
 
 def _default_secret_paths() -> list[Path]:
     return [
-        Path.home() / ".mfy_local_app" / "secrets.toml",
+        local_secret_path(),
         Path.cwd() / ".streamlit" / "secrets.toml",
         Path.cwd() / "app" / ".streamlit" / "secrets.toml",
     ]
+
+
+def local_secret_path() -> Path:
+    return Path.home() / ".mfy_local_app" / "secrets.toml"
+
+
+def read_local_secrets() -> Dict[str, str]:
+    return _read_toml(local_secret_path())
+
+
+def write_local_secret(name: str, value: str) -> None:
+    if not name:
+        return
+    target = local_secret_path()
+    try:
+        payload = _read_toml(target) if target.exists() else {}
+    except Exception:
+        payload = {}
+    payload[name] = str(value)
+    _write_toml(target, payload)
+
+
+def delete_local_secret(name: str) -> None:
+    if not name:
+        return
+    target = local_secret_path()
+    try:
+        payload = _read_toml(target) if target.exists() else {}
+    except Exception:
+        payload = {}
+    if name not in payload:
+        return
+    payload.pop(name, None)
+    _write_toml(target, payload)
+
+
+def has_local_secret(name: str) -> bool:
+    payload = read_local_secrets()
+    return bool(payload.get(name))
+
+
+def _write_toml(path: Path, payload: Dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for k, v in payload.items():
+        escaped = str(v).replace("\\", "\\\\").replace('"', '\\"')
+        lines.append(f'{k} = "{escaped}"')
+    try:
+        path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+def redact_secret(value: str) -> str:
+    if not value:
+        return "ABSENTE"
+    if len(value) <= 10:
+        return f"{value[:2]}****"
+    return f"{value[:3]}****...{value[-4:]}"
+
+
+def openai_key_format_warning(value: str) -> str:
+    if not value or value.startswith("sk-") or value.startswith("sk-proj-"):
+        return ""
+    return "Format inattendu : une clé OpenAI commence généralement par 'sk-' ou 'sk-proj-'."
 
 
 def resolve_api_key(
@@ -137,6 +206,13 @@ def get_provider_status() -> dict[str, dict[str, object]]:
 
 __all__ = [
     "ProviderInfo",
+    "delete_local_secret",
     "get_provider_status",
+    "has_local_secret",
+    "local_secret_path",
+    "openai_key_format_warning",
+    "read_local_secrets",
+    "redact_secret",
     "resolve_api_key",
+    "write_local_secret",
 ]

@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from app.services.provider_status import resolve_api_key
+from app.services.provider_status import redact_secret, resolve_api_key
 from app.services.generation_report import GenerationReport
 
 
@@ -19,6 +19,7 @@ REQUIRED_FIELDS = {
     "transport_bus_texte",
     "transport_taxi_texte",
 }
+MODELS_URL = "https://api.openai.com/v1/models"
 
 
 def _get_openai_api_key() -> str:
@@ -48,6 +49,41 @@ def _openai_post(url: str, payload: dict, api_key: str, timeout_s: int) -> dict:
             snippet = (response.text or "")[:500]
             raise RuntimeError(f"OpenAI error {response.status_code}: {snippet}")
     return response.json()
+
+
+def _sanitize_error_message(message: str, api_key: str) -> str:
+    cleaned = (message or "").strip().replace("\n", " ")
+    if api_key:
+        cleaned = cleaned.replace(api_key, redact_secret(api_key))
+    return cleaned[:180] if cleaned else "erreur inconnue"
+
+
+def test_openai_api_key(api_key: Optional[str] = None) -> tuple[bool, str]:
+    key = (api_key or "").strip()
+    if not key:
+        try:
+            key = _get_openai_api_key().strip()
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)
+    if not key:
+        return False, "clé absente"
+    try:
+        response = requests.get(
+            MODELS_URL,
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=10,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return False, _sanitize_error_message(str(exc), key)
+    if response.status_code == 200:
+        return True, "ok"
+    try:
+        payload = response.json()
+        err = payload.get("error", {}) if isinstance(payload, dict) else {}
+        message = err.get("message") or response.text or "erreur OpenAI"
+    except ValueError:
+        message = response.text or "erreur OpenAI"
+    return False, _sanitize_error_message(f"{response.status_code}: {message}", key)
 
 
 def _build_structured_payload(prompt: str, schema: Dict[str, Any]) -> dict:
