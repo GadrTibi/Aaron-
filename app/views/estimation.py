@@ -145,17 +145,6 @@ def _collect_line_refs(items: list, limit: Optional[int] = None) -> list[str]:
     return refs
 
 
-def _format_line_labels(items: list, prefix: str) -> str:
-    refs = _collect_line_refs(items)
-    labels: list[str] = []
-    for ref in refs:
-        if prefix and not ref.lower().startswith(prefix.lower()):
-            labels.append(f"{prefix} {ref}")
-        else:
-            labels.append(ref)
-    return ", ".join(labels)
-
-
 def _display_transport_caption(*debug_values: dict | None) -> None:
     pairs = [(label, dbg) for label, dbg in zip(["taxi", "metro", "bus"], debug_values) if isinstance(dbg, dict)]
     if not pairs:

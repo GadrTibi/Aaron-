@@ -189,6 +189,7 @@ def render(config: dict) -> None:
     st.text_area("Métro (lignes)", key="transport_metro_texte", placeholder="Ex: 2, 12")
     st.text_area("Bus (lignes)", key="transport_bus_texte", placeholder="Ex: 30, 40, 54")
     st.text_area("Taxi (stations proches)", key="transport_taxi_texte", placeholder="Stations de taxi")
+    st.caption("ℹ️ Le taxi n'apparaît que dans le PDF : le modèle Book PPTX n'a pas de zone taxi.")
 
     # Ancienne récupération automatique (Overpass/GTFS) : rétrogradée, masquée à
     # l'utilisateur. Réactivable via MFY_DEBUG=1.
