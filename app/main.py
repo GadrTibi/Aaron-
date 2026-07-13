@@ -11,8 +11,15 @@ from pathlib import Path
 # makes the package importable in both direct execution and ``python -m``
 # contexts.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+# Force la racine du repo en TÊTE du sys.path (pas seulement "présente"). Sous
+# `streamlit run app/main.py`, Streamlit place le dossier app/ sur le path : si la
+# racine est ailleurs (ou absente), `import services` (couche racine : places_geoapify,
+# places_google, wiki_poi…) résout par erreur vers app/services/ et l'app crashe
+# (ModuleNotFoundError: services.places_geoapify). En forçant la racine en position 0,
+# racine/services masque app/services. Cf. dette « unifier les 2 couches services ».
+while BASE_DIR in sys.path:
+    sys.path.remove(BASE_DIR)
+sys.path.insert(0, BASE_DIR)
 
 import streamlit as st
 

@@ -69,8 +69,12 @@ hypothèses ; confirmation client requise avant recette finale.
 
 **Tests** : 128 verts (dont tests de recette CD/MD, substitution réelle des 3 documents, motif token, cache Windows).
 
-**Dettes notées** (non bloquantes) : couplage inverse `services/transports_v3 → app.views` (legacy GTFS) ;
-unification des 2 couches `services/` ; expander « Ancienne méthode (debug) » transport legacy à masquer ;
+**Dettes notées** : **unification des 2 couches `services/` — PRIORITÉ HAUTE** : leur collision faisait
+**crasher l'app au démarrage** sous `streamlit run app/main.py` (`import services` résolvait vers
+`app/services/` au lieu de `racine/services/` → `ModuleNotFoundError: services.places_geoapify`).
+Contourné en forçant la racine en tête du `sys.path` (app/main.py) ; la vraie correction est d'unifier
+les deux couches en une seule. Autres (non bloquantes) : couplage inverse `services/transports_v3 →
+app.views` (legacy GTFS) ; expander « Ancienne méthode (debug) » transport legacy à masquer ;
 incohérence chemins `out/` vs `output/` à unifier ; geocode_flow orphelin.
 
 **Nitpick accepté (non corrigé, décision)** : `missing_essential_keys()` relit les fichiers TOML à chaque
