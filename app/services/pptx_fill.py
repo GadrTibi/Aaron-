@@ -9,7 +9,7 @@ from pptx.util import Inches
 from PIL import Image
 
 from app.services.pptx_images import inject_tagged_image
-from services.pptx_links import add_hyperlink_to_text
+from app.services.pptx_links import add_hyperlink_to_text
 from app.services.generation_report import GenerationReport
 from app.services.token_utils import extract_pptx_tokens_from_presentation, walk_pptx_shapes
 

@@ -9,10 +9,10 @@ from typing import Dict, Iterable, List
 
 from app.services.generation_report import GenerationReport
 from app.services.provider_status import get_provider_status
-from services.places_geoapify import GeoapifyPlacesService, Place
-from services.places_google import GPlace, GooglePlacesService
-from services.places_otm import OpenTripMapService, Visit
-from services.wiki_poi import POI, WikiPOIService
+from app.services.places_geoapify import GeoapifyPlacesService, Place
+from app.services.places_google import GPlace, GooglePlacesService
+from app.services.places_otm import OpenTripMapService, Visit
+from app.services.wiki_poi import POI, WikiPOIService
 
 LOGGER = logging.getLogger(__name__)
 

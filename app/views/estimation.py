@@ -48,8 +48,8 @@ from app.services.revenue import (
 )
 from app.services.template_catalog import list_effective_estimation_templates
 from app.services.template_validation import validate_pptx_template
-from services.image_uploads import save_uploaded_image
-from services.wiki_images import ImageCandidate, WikiImageService
+from app.services.image_uploads import save_uploaded_image
+from app.services.wiki_images import ImageCandidate, WikiImageService
 
 from .utils import (
     _sanitize_filename,

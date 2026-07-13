@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from services.transports_v3 import TransportService
+from app.services.transports_v3 import TransportService
 
 
 def main() -> None:

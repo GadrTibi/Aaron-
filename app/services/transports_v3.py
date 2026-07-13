@@ -13,8 +13,8 @@ from zipfile import ZipFile
 import requests
 
 from app.services.overpass_client import query_overpass
-from app.views.settings_keys import read_local_secret
-from services.transport_cache import TransportCache
+from app.services.provider_status import resolve_api_key
+from app.services.transport_cache import TransportCache
 
 
 @dataclass
@@ -280,7 +280,7 @@ class GoogleProvider:
     ENDPOINT = "https://places.googleapis.com/v1/places:searchNearby"
 
     def __init__(self, api_key: Optional[str] = None) -> None:
-        self.api_key = api_key or read_local_secret("GOOGLE_MAPS_API_KEY")
+        self.api_key = api_key or resolve_api_key("GOOGLE_MAPS_API_KEY")[0]
 
     def _search(self, lat: float, lon: float, radius_m: int, included: list[str], limit: int) -> list[str]:
         if not self.api_key:
