@@ -10,7 +10,7 @@ import streamlit as st
 
 from app.services import template_roots
 from app.services.book_pdf import build_book_pdf
-from app.services.book_tokens import build_book_mapping
+from app.services.book_tokens import build_book_mapping, build_book_pdf_sections
 from app.services.generation_report import GenerationReport
 from app.services.geocoding_fallback import geocode_address_fallback
 from app.services.map_image import build_static_map
@@ -326,13 +326,14 @@ def render(config: dict) -> None:
     with col2:
         if st.button("Générer le Book (PDF simplifié)"):
             pdf_out = os.path.join(OUT_DIR, f"Book - {st.session_state.get('bien_addr', 'bien')}.pdf")
-            sections: list[str] = []
-            build_book_pdf(
-                pdf_out,
-                "",
-                "",
-                sections,
-            )
-            st.success(f"OK: {pdf_out}")
-            with open(pdf_out, "rb") as f:
-                st.download_button("Télécharger le PDF", data=f.read(), file_name=os.path.basename(pdf_out))
+            titre, intro, sections = build_book_pdf_sections(mapping)
+            if not sections:
+                st.warning(
+                    "Aucune donnée à mettre dans le PDF (adresse, transports, accès, Wi-Fi tous vides). "
+                    "Renseignez au moins un champ avant de générer."
+                )
+            else:
+                build_book_pdf(pdf_out, titre, intro, sections)
+                st.success(f"OK: {pdf_out}")
+                with open(pdf_out, "rb") as f:
+                    st.download_button("Télécharger le PDF", data=f.read(), file_name=os.path.basename(pdf_out))
