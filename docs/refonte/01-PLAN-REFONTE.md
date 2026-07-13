@@ -82,3 +82,19 @@ rerun (≈6 lectures FS/interaction) — **réactivité du bandeau prioritaire**
 locale mono-utilisateur ; ne pas cacher (un cache masquerait l'ajout d'une clé).
 
 **Non mergé sur `main`** : `main` = déploiement Streamlit Cloud → merge = décision PM (irréversible).
+
+---
+
+## Sprint 2 — améliorations (décisions PM 2026-07-13)
+
+Le PM a validé (cartes de décision) : avancer sur les hypothèses de calcul actuelles ;
+développer les 4 chantiers d'amélioration ; masquer le transport legacy.
+
+| Lot | État | Détail |
+|---|---|---|
+| F — Unifier les 2 couches services | ✅ gaté | `services/` fusionné dans `app/services/` ; supprime la **cause racine** du crash de démarrage ; couplage inverse corrigé. |
+| G — Fiabiliser les appels API | ✅ | Couche HTTP commune `http_client.request_with_retry` (retry/backoff 429/5xx/timeout, Retry-After) ; OpenAI routé dessus + `max_output_tokens`. **Décision : requests durci, pas le SDK** (non testable sans clé côté build ; bascule triviale plus tard). |
+| H — Polir l'UI | ✅ | `debug_enabled()` (MFY_DEBUG) masque les checkboxes debug, l'expander « Debug revenus », et le **mode transport legacy** Overpass/GTFS. Rien supprimé (réactivable). |
+| I — Book | ✅ | Transports **éditables** réutilisant l'Estimation (invariants #1/#2) ; bouton Overpass masqué. Contenu métier borné aux 8 tokens (specs = P4). |
+
+**Tests** : 148 verts. **App** : démarre et rend (localhost:8501, 4 pages). Gate Akainu par lot.
