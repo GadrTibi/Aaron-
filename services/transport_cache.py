@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Iterable, Tuple
 
 
 DEFAULT_CACHE_DIR = Path(os.getenv("MFY_TRANSPORT_CACHE_DIR", "out/cache/transports"))
+
+# Caractères interdits dans un nom de fichier Windows (`:` notamment, présent dans
+# la clé lat:lon:radius:providers). Sans cet assainissement, l'écriture du cache
+# lève OSError [Errno 22] sur Windows — cible d'exécution locale de l'app.
+_ILLEGAL_FS_CHARS = re.compile(r'[<>:"/\\|?*]')
+
+
+def _safe_filename(key: str) -> str:
+    return _ILLEGAL_FS_CHARS.sub("_", key)
 
 
 def _normalize_float(value: float, *, rounding: int = 4) -> float:
@@ -27,7 +37,7 @@ def _key(lat: float, lon: float, radius_m: int, provider_order: Iterable[str], *
 def _cache_file(key: str, base_dir: Path | str | None = None) -> Path:
     folder = Path(base_dir) if base_dir is not None else DEFAULT_CACHE_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    return folder / f"{key}.json"
+    return folder / f"{_safe_filename(key)}.json"
 
 
 def _is_expired(ts: float, ttl_seconds: float) -> bool:
