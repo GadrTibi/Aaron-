@@ -2,13 +2,19 @@ from app.services.revenue import RevenueInputs, compute_revenue, round_to_50_dow
 
 
 def test_md_matches_client_numbers():
+    # Reproduit l'appel réel de l'app pour un MD : les JOURS/mois pilotent le
+    # revenu (le taux d'occupation est affiché mais ne re-multiplie pas). Cf.
+    # docs/refonte/00-CDC-REFERENCE.md §3.2 et point ouvert P2.
+    # Le test précédent omettait days_per_month=26 et retombait sur le défaut 30
+    # (=> 3780 au lieu de 3276) : c'était un bug du TEST, pas du calcul.
     calc = compute_revenue(
         RevenueInputs(
             prix_nuitee=126,
-            taux_occupation_pct=0.0,
+            taux_occupation_pct=83.0,  # affiché seulement, ne multiplie pas
             platform_fee_pct=15.0,
             mfy_commission_pct=15.0,
         ),
+        days_per_month=26,
         estimation_type="MD",
     )
 
@@ -17,6 +23,10 @@ def test_md_matches_client_numbers():
     prix_cible = round_to_50_down(base_estimation * 1.00)
     prix_opt = round_to_50_down(base_estimation * 1.06)
 
+    # 126 x 26 = 3276 ; frais plateforme = round(3276*0.15) = round(491.4) = 491.
+    # NB (point ouvert P3) : le doc de transmission mentionne 492 / 910. Tout
+    # arrondi de 491,4 donne 491 -> le "492" du doc est un arrondi approximatif à
+    # confirmer avec le screenshot client réel avant recette finale.
     assert calc["revenu_brut"] == 3276
     assert calc["platform_fee_eur"] == 491
     assert calc["mfy_commission_eur"] == 418
