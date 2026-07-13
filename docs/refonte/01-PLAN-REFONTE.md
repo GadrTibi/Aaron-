@@ -73,4 +73,8 @@ hypothèses ; confirmation client requise avant recette finale.
 unification des 2 couches `services/` ; expander « Ancienne méthode (debug) » transport legacy à masquer ;
 incohérence chemins `out/` vs `output/` à unifier ; geocode_flow orphelin.
 
+**Nitpick accepté (non corrigé, décision)** : `missing_essential_keys()` relit les fichiers TOML à chaque
+rerun (≈6 lectures FS/interaction) — **réactivité du bandeau prioritaire** sur la micro-I/O pour une app
+locale mono-utilisateur ; ne pas cacher (un cache masquerait l'ajout d'une clé).
+
 **Non mergé sur `main`** : `main` = déploiement Streamlit Cloud → merge = décision PM (irréversible).
