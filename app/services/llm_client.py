@@ -4,13 +4,14 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-import requests
-
+from app.services import http_client
 from app.services.provider_status import redact_secret, resolve_api_key
 from app.services.generation_report import GenerationReport
 
 
 DEFAULT_MODEL = os.environ.get("MFY_OPENAI_MODEL", "gpt-4o-mini")
+# Garde-fou de coût : borne la taille de la réponse LLM (configurable).
+MAX_OUTPUT_TOKENS = int(os.environ.get("MFY_OPENAI_MAX_OUTPUT_TOKENS", "800"))
 RESPONSES_URL = "https://api.openai.com/v1/responses"
 REQUEST_TIMEOUT = 30
 REQUIRED_FIELDS = {
@@ -36,7 +37,10 @@ def _openai_post(url: str, payload: dict, api_key: str, timeout_s: int) -> dict:
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=timeout_s)
+    # Couche commune : retry/backoff sur 429/5xx/timeout (résilience OpenAI).
+    response = http_client.request_with_retry(
+        "POST", url, headers=headers, json=payload, timeout=timeout_s
+    )
     if response.status_code >= 400:
         try:
             data = response.json()
@@ -68,7 +72,8 @@ def test_openai_api_key(api_key: Optional[str] = None) -> tuple[bool, str]:
     if not key:
         return False, "clé absente"
     try:
-        response = requests.get(
+        response = http_client.request_with_retry(
+            "GET",
             MODELS_URL,
             headers={"Authorization": f"Bearer {key}"},
             timeout=10,
@@ -102,6 +107,7 @@ def _build_structured_payload(prompt: str, schema: Dict[str, Any]) -> dict:
             }
         },
         "temperature": 0.2,
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
     }
 
 
@@ -114,6 +120,7 @@ def _build_json_object_payload(prompt: str) -> dict:
         ],
         "text": {"format": {"type": "json_object"}},
         "temperature": 0.2,
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
     }
 
 

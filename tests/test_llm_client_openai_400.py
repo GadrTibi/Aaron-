@@ -26,7 +26,7 @@ def test_openai_error_message_surface(monkeypatch):
             text='{"error":{"message":"quota exceeded"}}',
         )
 
-    monkeypatch.setattr(llm_client, "requests", type("Req", (), {"post": staticmethod(fake_post)}))
+    monkeypatch.setattr(llm_client.http_client, "request_with_retry", fake_post)
     monkeypatch.setattr(llm_client, "_get_openai_api_key", lambda: "dummy")
 
     with pytest.raises(RuntimeError) as excinfo:

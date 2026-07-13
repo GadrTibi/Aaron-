@@ -8,7 +8,7 @@ def test_fallback_to_json_object(monkeypatch):
     calls = {"count": 0}
     report = GenerationReport()
 
-    def fake_post(url, headers, json=None, timeout=None):
+    def fake_post(method, url, **kwargs):
         calls["count"] += 1
         if calls["count"] == 1:
             class Resp:
@@ -35,7 +35,7 @@ def test_fallback_to_json_object(monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr(llm_client, "requests", type("Req", (), {"post": staticmethod(fake_post)}))
+    monkeypatch.setattr(llm_client.http_client, "request_with_retry", fake_post)
     monkeypatch.setattr(llm_client, "_get_openai_api_key", lambda: "dummy")
 
     result = llm_client.invoke_llm_json("prompt", {"type": "object"}, report)
