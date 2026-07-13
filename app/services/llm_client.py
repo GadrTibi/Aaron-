@@ -10,7 +10,10 @@ from app.services.generation_report import GenerationReport
 
 
 DEFAULT_MODEL = os.environ.get("MFY_OPENAI_MODEL", "gpt-4o-mini")
-# Garde-fou de coût : borne la taille de la réponse LLM (configurable).
+# Garde-fou de coût : borne la taille de la réponse LLM. 800 tokens suffisent
+# largement pour une intro de quartier (2-3 phrases) + les 3 textes de transports
+# compacts. Si une troncature survenait (JSON incomplet -> saisie manuelle en repli),
+# augmenter MFY_OPENAI_MAX_OUTPUT_TOKENS.
 MAX_OUTPUT_TOKENS = int(os.environ.get("MFY_OPENAI_MAX_OUTPUT_TOKENS", "800"))
 RESPONSES_URL = "https://api.openai.com/v1/responses"
 REQUEST_TIMEOUT = 30

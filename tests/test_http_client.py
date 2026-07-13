@@ -70,3 +70,22 @@ def test_respects_retry_after_header(monkeypatch):
     slept = []
     http_client.request_with_retry("GET", "http://x", sleep=slept.append)
     assert slept == [2.0]  # a dormi la durée Retry-After, pas le backoff par défaut
+
+
+def test_retry_after_is_capped(monkeypatch):
+    # Un Retry-After abusif (3600 s) ne doit jamais figer l'UI : plafonné à MAX_SLEEP_S.
+    _seq_requests(monkeypatch, [_Resp(503, {"Retry-After": "3600"}), _Resp(200)])
+    slept = []
+    http_client.request_with_retry("GET", "http://x", sleep=slept.append)
+    assert slept == [http_client.MAX_SLEEP_S]
+
+
+def test_no_retry_on_timeout_when_disabled(monkeypatch):
+    # Requête non idempotente : un timeout ne doit PAS être rejoué (double effet).
+    calls = _seq_requests(monkeypatch, [requests.Timeout("boom"), _Resp(200)])
+    try:
+        http_client.request_with_retry("POST", "http://x", retry_on_timeout=False, sleep=lambda _: None)
+        assert False, "aurait dû lever Timeout sans réessayer"
+    except requests.Timeout:
+        pass
+    assert calls["n"] == 1
