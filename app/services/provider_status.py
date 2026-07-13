@@ -19,6 +19,15 @@ class ProviderInfo:
     name: str
     env_keys: Iterable[str]
     requires_key: bool = True
+    essential: bool = False          # requis pour un document complet
+    purpose: str = ""                # à quoi sert la clé (affiché à l'utilisateur)
+    signup_url: str = ""             # où obtenir la clé
+    testable: bool = False           # un bouton "Tester" est proposé
+
+    @property
+    def key_name(self) -> str:
+        """Nom canonique de la clé (1re clé d'environnement déclarée)."""
+        return next(iter(self.env_keys), "")
 
 
 def _read_toml(path: Path) -> Dict[str, str]:
@@ -167,14 +176,57 @@ def resolve_api_key(
 
 def _provider_definitions() -> list[ProviderInfo]:
     return [
-        ProviderInfo("Google Places", ["GOOGLE_MAPS_API_KEY"]),
-        ProviderInfo("OpenAI", ["OPENAI_API_KEY"]),
-        ProviderInfo("Geoapify", ["GEOAPIFY_API_KEY"]),
-        ProviderInfo("OpenTripMap", ["OPENTRIPMAP_API_KEY"]),
-        ProviderInfo("Unsplash", ["UNSPLASH_ACCESS_KEY"]),
-        ProviderInfo("Pexels", ["PEXELS_API_KEY"]),
-        ProviderInfo("Wikimedia", [], requires_key=False),
+        ProviderInfo(
+            "OpenAI", ["OPENAI_API_KEY"], essential=True, testable=True,
+            purpose="Rédige l'introduction du quartier et les textes de transports (métro, bus, taxi).",
+            signup_url="https://platform.openai.com/api-keys",
+        ),
+        ProviderInfo(
+            "Google Maps Platform", ["GOOGLE_MAPS_API_KEY"], essential=True, testable=True,
+            purpose="Recherche les points d'intérêt du quartier (incontournables, spots, lieux à visiter).",
+            signup_url="https://console.cloud.google.com/google/maps-apis/credentials",
+        ),
+        ProviderInfo(
+            "Geoapify", ["GEOAPIFY_API_KEY"], essential=False,
+            purpose="Solution de secours pour les points d'intérêt et le géocodage (facultatif).",
+            signup_url="https://myprojects.geoapify.com/",
+        ),
+        ProviderInfo(
+            "OpenTripMap", ["OPENTRIPMAP_API_KEY"], essential=False,
+            purpose="Source complémentaire de lieux touristiques (facultatif).",
+            signup_url="https://opentripmap.io/product",
+        ),
+        ProviderInfo(
+            "Unsplash", ["UNSPLASH_ACCESS_KEY"], essential=False,
+            purpose="Améliore la recherche de photos des lieux à visiter (facultatif).",
+            signup_url="https://unsplash.com/developers",
+        ),
+        ProviderInfo(
+            "Pexels", ["PEXELS_API_KEY"], essential=False,
+            purpose="Source d'images de secours quand Unsplash/Wikimedia ne suffisent pas (facultatif).",
+            signup_url="https://www.pexels.com/api/",
+        ),
+        ProviderInfo(
+            "Wikimedia", [], requires_key=False, essential=False,
+            purpose="Images et informations de lieux connus. Aucune clé requise.",
+        ),
     ]
+
+
+def list_providers() -> list[ProviderInfo]:
+    """Liste publique des fournisseurs (pour l'écran Clés API et les indicateurs)."""
+    return _provider_definitions()
+
+
+def missing_essential_keys() -> list[ProviderInfo]:
+    """Fournisseurs ESSENTIELS dont la clé est absente (pour l'onboarding/alerte)."""
+    out = []
+    for p in _provider_definitions():
+        if p.essential and p.requires_key:
+            value, _ = resolve_api_key(p.key_name)
+            if not value:
+                out.append(p)
+    return out
 
 
 def get_provider_status() -> dict[str, dict[str, object]]:
@@ -209,7 +261,9 @@ __all__ = [
     "delete_local_secret",
     "get_provider_status",
     "has_local_secret",
+    "list_providers",
     "local_secret_path",
+    "missing_essential_keys",
     "openai_key_format_warning",
     "read_local_secrets",
     "redact_secret",

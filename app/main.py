@@ -17,6 +17,7 @@ if BASE_DIR not in sys.path:
 import streamlit as st
 
 from app.services import template_roots
+from app.services.provider_status import missing_essential_keys
 from app.views import estimation, mandat, book, settings_keys
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -50,8 +51,20 @@ st.title("MFY - Outil local (Estimation • Mandat • Book)")
 
 with st.sidebar:
     st.header("Navigation")
-    page = st.radio("Aller à :", ["Estimation", "Mandat", "Book", "Paramètres / Clés API"])
+    page = st.radio("Aller à :", ["Estimation", "Mandat", "Book", "Paramètres / Clés API"], key="nav_page")
     st.caption("Chaque page n'affiche que les champs nécessaires au document.")
+
+# Indicateur de disponibilité : rappelle de configurer les clés essentielles tant
+# qu'elles manquent (masqué sur la page Paramètres qui gère déjà l'onboarding).
+if page != "Paramètres / Clés API":
+    _missing_keys = missing_essential_keys()
+    if _missing_keys:
+        _noms = ", ".join(p.name for p in _missing_keys)
+        st.warning(
+            f"⚠️ Clé(s) essentielle(s) manquante(s) : **{_noms}**. "
+            "Ouvrez « Paramètres / Clés API » (menu de gauche) pour les configurer — "
+            "sinon les documents générés seront incomplets."
+        )
 
 # -------- Common data (Owner & Property) shown on all pages, compact --------
 with st.expander("Données générales (Propriétaire & Bien)", expanded=True):

@@ -1138,8 +1138,6 @@ def render(config):
     # === MAP ===
     _attach_map(image_by_shape)
 
-    print("DBG image_by_shape (final):", image_by_shape)
-
     strict_mode = bool(os.environ.get("MFY_STRICT_GENERATION"))
     est_tpl_path = selected_template.path if selected_template else None
     validation_result = None
