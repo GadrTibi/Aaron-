@@ -5,7 +5,14 @@ from docx import Document
 from pptx import Presentation
 
 
-DOCX_TOKEN_PATTERN = re.compile(r"«[^»]+»")
+# Un token Word MFY est un IDENTIFIANT entre guillemets français, sans espace :
+# «Nom_du_propriétaire», «MANDAT_JOUR_SIGNATURE»...  (\w couvre lettres accentuées,
+# chiffres et underscore en mode Unicode). On EXCLUT ainsi les termes juridiques
+# légitimes mis entre guillemets typographiques dans le corps du mandat
+# (« Mandant », « Bien », « Mandataire », « Notice d'Information… ») qui, avec
+# l'ancien motif «[^»]+», étaient signalés à tort comme tokens non remplacés
+# (faux « document incomplet », bloquant en mode strict).
+DOCX_TOKEN_PATTERN = re.compile(r"«\w+»")
 PPTX_TOKEN_PATTERN = re.compile(r"\[\[[^\]]+\]\]")
 
 
