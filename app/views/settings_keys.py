@@ -25,7 +25,8 @@ from app.services.provider_status import (
 
 
 # --------------------------------------------------------------------------- #
-# Lecture de secret (conservée : utilisée hors UI, ex. services.transports_v3)
+# Lecture de secret (helper conservé pour les scripts tools/ ; l'application, elle,
+# résout les clés via provider_status.resolve_api_key)
 # --------------------------------------------------------------------------- #
 
 def _dump_toml(d: Dict[str, Any]) -> str:

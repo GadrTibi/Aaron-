@@ -38,6 +38,9 @@ def _read_toml(path: Path) -> Dict[str, str]:
     except OSError:
         return {}
     if tomllib is None:
+        # Runtime cible = Python >= 3.11 (CDC : 3.12+), tomllib toujours présent.
+        # Le secret local en TOML n'est de toute façon utilisé qu'en dev ; en
+        # production Streamlit Cloud les clés passent par st.secrets.
         return {}
     try:
         data = tomllib.loads(raw.decode("utf-8"))
