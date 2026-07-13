@@ -54,6 +54,7 @@ from app.services.wiki_images import ImageCandidate, WikiImageService
 from .utils import (
     _sanitize_filename,
     apply_pending_fields,
+    debug_enabled,
     render_generation_report,
     render_template_validation,
 )
@@ -299,7 +300,7 @@ def render(config):
         elif not templates:
             st.info("Déposez un template ou ajoutez un fichier dans le dépôt pour continuer.")
 
-    geocode_debug = st.checkbox("Debug géocodage", key="geocode_debug_toggle")
+    geocode_debug = st.checkbox("Debug géocodage", key="geocode_debug_toggle") if debug_enabled() else False
 
     def _geocode_main_address(show_debug: bool = False):
         addr_raw = st.session_state.get("bien_addr", "") or ""
@@ -429,7 +430,7 @@ def render(config):
         enrich_clicked = st.button("✨ Enrichir auto", disabled=not st.session_state.get("bien_addr", "").strip())
     with col_hint:
         st.caption("Saisissez l'adresse puis lancez l'enrichissement. Vous pouvez modifier manuellement si besoin.")
-    sanitize_debug_toggle = st.checkbox("Debug enrichissement quartier/transports", key="sanitize_debug_toggle")
+    sanitize_debug_toggle = st.checkbox("Debug enrichissement quartier/transports", key="sanitize_debug_toggle") if debug_enabled() else False
 
     if enrich_clicked:
         perf_transports: dict[str, object] = {}
@@ -488,77 +489,81 @@ def render(config):
                 st.write("Après sanitize")
                 st.json(debug_data.get("apres", {}))
 
-    with st.expander("Ancienne méthode (debug)", expanded=False):
-        perf_transports: dict[str, object] = {}
-        transport_mode = st.selectbox(
-            "Mode transports",
-            options=["FAST", "ENRICHED", "FULL"],
-            index=0,
-            help="FAST (Overpass uniquement, recommandé), ENRICHED (Overpass + Google si disponible), FULL (ajoute GTFS).",
-            key="legacy_transport_mode",
-        )
-        if st.button("Remplir Transports (auto)", key="legacy_transports_btn"):
-            lat, lon, provider_used, perf_geocode = _geocode_main_address(show_debug=geocode_debug)
-            if lat is not None:
-                start_tr = perf_counter()
-                with st.spinner("Chargement des transports…"):
-                    try:
-                        radius_raw = st.session_state.get(POI_RADIUS_KEY, DEFAULT_RADIUS_M)
+    # Mode transport legacy (Overpass/GTFS) : rétrogradé (lent, peu présentable),
+    # masqué à l'utilisateur. Réactivable via MFY_DEBUG=1. L'app utilise l'IA +
+    # saisie manuelle pour les transports.
+    if debug_enabled():
+        with st.expander("Ancienne méthode (debug)", expanded=False):
+            perf_transports: dict[str, object] = {}
+            transport_mode = st.selectbox(
+                "Mode transports",
+                options=["FAST", "ENRICHED", "FULL"],
+                index=0,
+                help="FAST (Overpass uniquement, recommandé), ENRICHED (Overpass + Google si disponible), FULL (ajoute GTFS).",
+                key="legacy_transport_mode",
+            )
+            if st.button("Remplir Transports (auto)", key="legacy_transports_btn"):
+                lat, lon, provider_used, perf_geocode = _geocode_main_address(show_debug=geocode_debug)
+                if lat is not None:
+                    start_tr = perf_counter()
+                    with st.spinner("Chargement des transports…"):
                         try:
-                            radius = int(radius_raw)
-                        except (TypeError, ValueError):
-                            radius = DEFAULT_RADIUS_M
-                        warning_count = len(run_report.provider_warnings)
-                        tr = get_transports(lat, lon, radius_m=radius, mode=transport_mode, report=run_report)
-                        st.session_state["q_tx"] = ", ".join(tr.get("taxis", []))
-                        st.session_state["metro_lines_auto"] = tr.get("metro_lines", [])
-                        st.session_state["bus_lines_auto"] = tr.get("bus_lines", [])
-                        metro_refs_tokens = _collect_line_refs(st.session_state["metro_lines_auto"], limit=3)
-                        bus_refs_tokens = _collect_line_refs(st.session_state["bus_lines_auto"], limit=3)
-                        if not st.session_state.get("transport_metro_texte"):
-                            st.session_state["transport_metro_texte"] = ", ".join(metro_refs_tokens)
-                        if not st.session_state.get("transport_bus_texte"):
-                            st.session_state["transport_bus_texte"] = ", ".join(bus_refs_tokens)
-                        if not st.session_state.get("transport_taxi_texte") and st.session_state.get("q_tx"):
-                            st.session_state["transport_taxi_texte"] = st.session_state["q_tx"]
-                        st.session_state["transport_providers"] = tr.get("provider_used", {})
-                        new_warnings = run_report.provider_warnings[warning_count:]
-                        for warning in new_warnings:
-                            st.warning(warning)
-                        perf_transports = {
-                            "duration": perf_counter() - start_tr,
-                            "provider": tr.get("provider_used", {}),
-                            "cache": tr.get("cache_status", "miss"),
-                            "mode": transport_mode,
-                            "metro_count": len(tr.get("metro_lines", [])),
-                            "bus_count": len(tr.get("bus_lines", [])),
-                            "raw_metro": tr.get("raw_counts", {}).get("metro"),
-                            "raw_bus": tr.get("raw_counts", {}).get("bus"),
-                        }
-                        run_report.add_note(
-                            f"Transports: {perf_transports['duration']:.2f}s (cache {perf_transports['cache']}, mode {transport_mode})."
-                        )
-                    except Exception as e:
-                        st.warning(f"Transports non chargés: {e}")
-                        st.session_state['transport_providers'] = {}
-            else:
-                st.session_state["q_tx"] = ""
-                st.session_state['metro_lines_auto'] = []
-                st.session_state['bus_lines_auto'] = []
-                st.session_state['transport_providers'] = {}
-                st.session_state["transport_metro_texte"] = st.session_state.get("transport_metro_texte", "")
-                st.session_state["transport_bus_texte"] = st.session_state.get("transport_bus_texte", "")
-                st.session_state["transport_taxi_texte"] = st.session_state.get("transport_taxi_texte", "")
-            if geocode_debug:
-                with st.expander("Détails performance", expanded=True):
-                    if perf_geocode:
-                        st.write(f"Géocodage: {perf_geocode.get('duration', 0):.2f}s via {perf_geocode.get('provider', '')} ({perf_geocode.get('cache', '')})")
-                    if perf_transports:
-                        st.write(
-                            f"Transports: {perf_transports.get('duration', 0):.2f}s cache={perf_transports.get('cache', '')} "
-                            f"bruts métro/bus: {perf_transports.get('raw_metro', '-')}/{perf_transports.get('raw_bus', '-')} "
-                            f"affichés métro/bus: {perf_transports.get('metro_count', 0)}/{perf_transports.get('bus_count', 0)}"
-                        )
+                            radius_raw = st.session_state.get(POI_RADIUS_KEY, DEFAULT_RADIUS_M)
+                            try:
+                                radius = int(radius_raw)
+                            except (TypeError, ValueError):
+                                radius = DEFAULT_RADIUS_M
+                            warning_count = len(run_report.provider_warnings)
+                            tr = get_transports(lat, lon, radius_m=radius, mode=transport_mode, report=run_report)
+                            st.session_state["q_tx"] = ", ".join(tr.get("taxis", []))
+                            st.session_state["metro_lines_auto"] = tr.get("metro_lines", [])
+                            st.session_state["bus_lines_auto"] = tr.get("bus_lines", [])
+                            metro_refs_tokens = _collect_line_refs(st.session_state["metro_lines_auto"], limit=3)
+                            bus_refs_tokens = _collect_line_refs(st.session_state["bus_lines_auto"], limit=3)
+                            if not st.session_state.get("transport_metro_texte"):
+                                st.session_state["transport_metro_texte"] = ", ".join(metro_refs_tokens)
+                            if not st.session_state.get("transport_bus_texte"):
+                                st.session_state["transport_bus_texte"] = ", ".join(bus_refs_tokens)
+                            if not st.session_state.get("transport_taxi_texte") and st.session_state.get("q_tx"):
+                                st.session_state["transport_taxi_texte"] = st.session_state["q_tx"]
+                            st.session_state["transport_providers"] = tr.get("provider_used", {})
+                            new_warnings = run_report.provider_warnings[warning_count:]
+                            for warning in new_warnings:
+                                st.warning(warning)
+                            perf_transports = {
+                                "duration": perf_counter() - start_tr,
+                                "provider": tr.get("provider_used", {}),
+                                "cache": tr.get("cache_status", "miss"),
+                                "mode": transport_mode,
+                                "metro_count": len(tr.get("metro_lines", [])),
+                                "bus_count": len(tr.get("bus_lines", [])),
+                                "raw_metro": tr.get("raw_counts", {}).get("metro"),
+                                "raw_bus": tr.get("raw_counts", {}).get("bus"),
+                            }
+                            run_report.add_note(
+                                f"Transports: {perf_transports['duration']:.2f}s (cache {perf_transports['cache']}, mode {transport_mode})."
+                            )
+                        except Exception as e:
+                            st.warning(f"Transports non chargés: {e}")
+                            st.session_state['transport_providers'] = {}
+                else:
+                    st.session_state["q_tx"] = ""
+                    st.session_state['metro_lines_auto'] = []
+                    st.session_state['bus_lines_auto'] = []
+                    st.session_state['transport_providers'] = {}
+                    st.session_state["transport_metro_texte"] = st.session_state.get("transport_metro_texte", "")
+                    st.session_state["transport_bus_texte"] = st.session_state.get("transport_bus_texte", "")
+                    st.session_state["transport_taxi_texte"] = st.session_state.get("transport_taxi_texte", "")
+                if geocode_debug:
+                    with st.expander("Détails performance", expanded=True):
+                        if perf_geocode:
+                            st.write(f"Géocodage: {perf_geocode.get('duration', 0):.2f}s via {perf_geocode.get('provider', '')} ({perf_geocode.get('cache', '')})")
+                        if perf_transports:
+                            st.write(
+                                f"Transports: {perf_transports.get('duration', 0):.2f}s cache={perf_transports.get('cache', '')} "
+                                f"bruts métro/bus: {perf_transports.get('raw_metro', '-')}/{perf_transports.get('raw_bus', '-')} "
+                                f"affichés métro/bus: {perf_transports.get('metro_count', 0)}/{perf_transports.get('bus_count', 0)}"
+                            )
 
     # ---- Incontournables (3), Spots (2), Visites (2 + images) ----
     st.subheader("Adresses du quartier (Slide 4)")
@@ -977,19 +982,20 @@ def render(config):
     colY.metric("Frais généraux", f"{FRAIS_GEN:.0f} €")
     colZ.metric("Revenu net", f"{REV_NET:.0f} €")
 
-    with st.expander("Debug revenus / mapping", expanded=False):
-        st.write({
-            "revenu_brut": REV_BRUT,
-            "platform_fee_pct": PLATFORM_FEE_PCT,
-            "platform_fee_eur": PLATFORM_FEE_EUR,
-            "base_commission": BASE_COMMISSION,
-            "mfy_commission_pct": MFY_COMMISSION_PCT,
-            "mfy_commission_eur": MFY_COMMISSION_EUR,
-            "taux_occ_pct": float(taux_occupation),
-            "jours_occ_30_num": jours_occ_30_num,
-            "jours_occ_30_mapping": jours_occ_30_mapping.get("[[JOURS_OCC_30]]"),
-        })
-        st.json(revenue_mapping)
+    if debug_enabled():
+        with st.expander("Debug revenus / mapping", expanded=False):
+            st.write({
+                "revenu_brut": REV_BRUT,
+                "platform_fee_pct": PLATFORM_FEE_PCT,
+                "platform_fee_eur": PLATFORM_FEE_EUR,
+                "base_commission": BASE_COMMISSION,
+                "mfy_commission_pct": MFY_COMMISSION_PCT,
+                "mfy_commission_eur": MFY_COMMISSION_EUR,
+                "taux_occ_pct": float(taux_occupation),
+                "jours_occ_30_num": jours_occ_30_num,
+                "jours_occ_30_mapping": jours_occ_30_mapping.get("[[JOURS_OCC_30]]"),
+            })
+            st.json(revenue_mapping)
 
     # Scénarios prix
     if estimation_type == "MD":
