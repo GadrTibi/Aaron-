@@ -1,5 +1,6 @@
 {
   "generated_at": "2025-12-23T12:44:00Z",
+  "_status": "PARTIELLEMENT OBSOLETE depuis la refonte 2026-07. Source de verite: docs/refonte/00-CDC-REFERENCE.md. La chaine d'images automatiques (image_fetcher.py, http_fetch.py, get_poi_image, download_binary, Unsplash/Pexels) a ete SUPPRIMEE au Lot A.",
   "entrypoints": [
     {"path": "run_app.py", "role": "Lance Streamlit avec espaces utilisateur persistants (Documents/MFY-App) et exporte les MFY_*."},
     {"path": "app/main.py", "role": "Entrée Streamlit (pages Estimation, Mandat, Book, Paramètres)."}

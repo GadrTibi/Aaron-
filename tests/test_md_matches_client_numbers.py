@@ -24,9 +24,10 @@ def test_md_matches_client_numbers():
     prix_opt = round_to_50_down(base_estimation * 1.06)
 
     # 126 x 26 = 3276 ; frais plateforme = round(3276*0.15) = round(491.4) = 491.
-    # NB (point ouvert P3) : le doc de transmission mentionne 492 / 910. Tout
-    # arrondi de 491,4 donne 491 -> le "492" du doc est un arrondi approximatif à
-    # confirmer avec le screenshot client réel avant recette finale.
+    # NB (point ouvert P3) : le doc de transmission RAPPORTE 492 / 910. Le code fige
+    # 491 / 909 (round(), cohérent avec le jeu de référence CD) ; 492 est inatteignable
+    # par la même règle d'arrondi que celle qui reproduit le CD. Divergence NON tranchée,
+    # à confirmer avec le screenshot client réel — on ne préjuge pas que 492 est faux.
     assert calc["revenu_brut"] == 3276
     assert calc["platform_fee_eur"] == 491
     assert calc["mfy_commission_eur"] == 418

@@ -196,16 +196,9 @@ def _provider_definitions() -> list[ProviderInfo]:
             purpose="Source complémentaire de lieux touristiques (facultatif).",
             signup_url="https://opentripmap.io/product",
         ),
-        ProviderInfo(
-            "Unsplash", ["UNSPLASH_ACCESS_KEY"], essential=False,
-            purpose="Améliore la recherche de photos des lieux à visiter (facultatif).",
-            signup_url="https://unsplash.com/developers",
-        ),
-        ProviderInfo(
-            "Pexels", ["PEXELS_API_KEY"], essential=False,
-            purpose="Source d'images de secours quand Unsplash/Wikimedia ne suffisent pas (facultatif).",
-            signup_url="https://www.pexels.com/api/",
-        ),
+        # NB : Unsplash / Pexels retirés (2026-07) — leur seul consommateur était
+        # app/services/image_fetcher.py, supprimé. Ne pas réafficher sans un
+        # consommateur réel (une clé sans effet trompe l'utilisateur).
         ProviderInfo(
             "Wikimedia", [], requires_key=False, essential=False,
             purpose="Images et informations de lieux connus. Aucune clé requise.",

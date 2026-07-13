@@ -99,10 +99,19 @@ Scénarios ✅ : pessimiste **0,88** / cible **1,00** / optimiste **1,15**, arro
 `revenu_brut = prix_nuitée × jours_par_mois` ✅ (les **jours** pilotent le revenu ; le **taux** est affiché mais ne re-multiplie pas).
 Défauts : taux **83 %**, jours **26**. Scénarios ✅ : pessimiste **0,93** / cible **1,00** / optimiste **1,06**, arrondi **au 50 inférieur** (`floor(x/50)×50`).
 
-**Jeu de référence MD** ✅ (verbatim client) : prix 126 €, jours 26, taux 83 %, plateforme 15 %, MFY 15 %
-→ brut **3 276 €**, plateforme **492 €**, commission **418 €**, frais **910 €**, pess **2 200 €**, cible **2 350 €**, opt **2 500 €**.
+**Jeu de référence MD** (rapporté par le doc de transmission) : prix 126 €, jours 26, taux 83 %, plateforme 15 %, MFY 15 %
+→ brut **3 276 €** ✅, commission **418 €** ✅, pess **2 200 €** ✅, cible **2 350 €** ✅, opt **2 500 €** ✅ ;
+plateforme **492 €** ⚠️ et frais **910 €** ⚠️ (voir divergence ci-dessous).
 
-⚠️ **Divergence d'arrondi à trancher (Lot B)** : `3276 × 15 % = 491,4` → le code fait `round()` = **491** et frais = **909**, alors que le **verbatim client = 492 / 910**. Le test `test_md_matches_client_numbers` est en outre **cassé** (il oublie `days_per_month=26`). → Objectif Lot B : **une règle d'arrondi unique qui reproduit EXACTEMENT les 2 jeux de référence**, + tests de recette corrigés.
+⚠️ **Divergence d'arrondi NON RÉSOLUE (point ouvert P3)** : `3276 × 15 % = 491,4` → le code fait
+`round()` = **491 €** (frais **909 €**), alors que le doc de transmission **rapporte 492 € / 910 €**.
+**Constat mathématique** : 491,4 s'arrondit à 491 par tout arrondi standard ; **492 est inatteignable
+par la même règle que celle qui reproduit le jeu CD** (CD exige `round(695,1)=695` ; un `ceil` donnerait
+696 et casserait CD). Donc 492/910 suppose soit une **règle d'arrondi MD spécifique côté client**, soit
+une **imprécision du report** — **on ne peut pas trancher sans le screenshot client réel**. En attendant,
+le code et les tests figent **491/909** (comportement `round()` cohérent avec CD) ; **ne pas préjuger**
+que 492 est faux. À confirmer avec MFY (P3). Le test `test_md_matches_client_numbers` était par ailleurs
+cassé (il omettait `days_per_month=26`) — corrigé au Lot B.
 
 ---
 
@@ -118,7 +127,9 @@ Ordre de résolution des clés ✅ : env → `st.secrets` → `~/.mfy_local_app/
 | Geoapify | Fallback POI / géocodage | Optionnel | `GEOAPIFY_API_KEY` |
 | OpenTripMap | POI touristiques (fallback) | Optionnel | `OPENTRIPMAP_API_KEY` |
 | Wikimedia/Wikidata | POI connus + images | Fallback, sans clé | non |
-| Unsplash / Pexels | Images (cascade) | Optionnels | `UNSPLASH_ACCESS_KEY` / `PEXELS_API_KEY` |
+
+> Unsplash / Pexels : **retirés** (2026-07). Leur seul consommateur (`image_fetcher.py`) a été
+> supprimé au Lot A ; les images de lieux passent désormais par Wikimedia + upload manuel.
 
 **Overpass / GTFS** : ⚠️ **rétrogradés** — lents, instables, résultats non présentables (confond nom d'arrêt et n° de ligne). Ne doivent **plus** être le cœur de « Quartier & Transports » (remplacés par OpenAI + saisie manuelle). Conservés au plus en fallback/debug.
 

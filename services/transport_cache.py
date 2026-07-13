@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import re
 import time
 from pathlib import Path
 from typing import Iterable, Tuple
@@ -12,14 +12,13 @@ from typing import Iterable, Tuple
 
 DEFAULT_CACHE_DIR = Path(os.getenv("MFY_TRANSPORT_CACHE_DIR", "out/cache/transports"))
 
-# Caractères interdits dans un nom de fichier Windows (`:` notamment, présent dans
-# la clé lat:lon:radius:providers). Sans cet assainissement, l'écriture du cache
-# lève OSError [Errno 22] sur Windows — cible d'exécution locale de l'app.
-_ILLEGAL_FS_CHARS = re.compile(r'[<>:"/\\|?*]')
-
 
 def _safe_filename(key: str) -> str:
-    return _ILLEGAL_FS_CHARS.sub("_", key)
+    # Hash de la clé -> nom de fichier toujours valide : jamais de caractère illégal
+    # Windows (`:` dans la clé lat:lon:radius:providers provoquait OSError [Errno 22]),
+    # longueur bornée, aucune collision. Aligné sur les caches frères
+    # app/services/geocode_cache.py et services/cache_utils.py (sha1).
+    return hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _normalize_float(value: float, *, rounding: int = 4) -> float:

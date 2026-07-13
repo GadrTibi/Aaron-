@@ -1,6 +1,14 @@
-"""Test de recette : sur les VRAIS templates versionnés, une génération avec un
-mapping complet ne doit laisser AUCUN token non remplacé. C'est la garantie
-"document présentable au client" (cf. docs/refonte/00-CDC-REFERENCE.md §6)."""
+"""Test du MOTEUR de substitution sur les VRAIS templates versionnés.
+
+Portée exacte :
+- Estimation / Book (mapping auto-référentiel `{token: "X"}`) : vérifie que le moteur
+  remplace TOUT token présent dans le template — c'est un test du moteur, PAS de la
+  complétude du mapping réel de l'app.
+- Mandat (vrai `build_mandat_mapping`) : teste en plus la complétude du mapping métier.
+
+La complétude du mapping RÉEL côté Book est couverte par
+`test_book_mapping_covers_template.py` ; côté Estimation, par les `test_estimation_mapping_*`.
+"""
 
 import glob
 import os
@@ -35,6 +43,7 @@ def test_estimation_templates_fully_substituted(tpl, tmp_path):
 @pytest.mark.parametrize("tpl", glob.glob(os.path.join(REPO, "templates/book/*.pptx")))
 def test_book_templates_fully_substituted(tpl, tmp_path):
     tokens = _pptx_tokens(tpl)
+    assert tokens, f"Aucun token détecté dans {tpl} (template suspect)"
     out = str(tmp_path / os.path.basename(tpl))
     generate_book_pptx(tpl, out, {t: "X" for t in tokens})
     assert _pptx_tokens(out) == set(), "Des tokens [[...]] restent dans le book généré"
