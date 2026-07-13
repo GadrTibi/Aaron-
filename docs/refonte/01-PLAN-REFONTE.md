@@ -53,3 +53,24 @@ on **fiabilise** et on **embellit**.
 ## Points ouverts (n'empêchent pas de builder)
 Cf. `02-points-ouverts-client.md`. On reproduit les jeux de référence client et on documente les
 hypothèses ; confirmation client requise avant recette finale.
+
+---
+
+## Avancement — 2026-07-13 (branche `refonte-propre`)
+
+| Lot | État | Détail |
+|---|---|---|
+| A — Nettoyage | ✅ | Chaîne d'images morte supprimée (~600 l.), bug cache Windows corrigé (sha1), doc produit canon. |
+| B — Calculs | ✅ | Test de recette MD corrigé ; divergence 491/492 non tranchée → point ouvert P3 (verbatim client). |
+| C — Tokens/POI | ✅ | Faux « document incomplet » mandat corrigé (motif = intention), 22 tokens mandat + estimation + book validés en substitution réelle. Devise OK, rayon POI couvert. |
+| D — UX clés API | ✅ | Onglet refait (tous providers utiles, test, statut, onboarding, rerun auto), indicateur de disponibilité. Smoke test AppTest : 4 pages sans exception. |
+| E — Book | ✅ | Génération PPTX + PDF validées, mapping réel couvre les tokens du template. Contenu métier en attente specs client (P4). |
+| Gate Akainu | ✅ boucle | 1er passage A–C : DÉFAUTS → remédiés (M1/m1/m2/m3/m4/n1/n2/n3). Re-gate A–E en cours. |
+
+**Tests** : 128 verts (dont tests de recette CD/MD, substitution réelle des 3 documents, motif token, cache Windows).
+
+**Dettes notées** (non bloquantes) : couplage inverse `services/transports_v3 → app.views` (legacy GTFS) ;
+unification des 2 couches `services/` ; expander « Ancienne méthode (debug) » transport legacy à masquer ;
+incohérence chemins `out/` vs `output/` à unifier ; geocode_flow orphelin.
+
+**Non mergé sur `main`** : `main` = déploiement Streamlit Cloud → merge = décision PM (irréversible).
