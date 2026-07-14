@@ -10,7 +10,7 @@ def test_invoke_llm_json_adds_warning(monkeypatch):
     def fake_post(*args, **kwargs):
         raise RuntimeError("network down")
 
-    monkeypatch.setattr(llm_client, "requests", type("Req", (), {"post": staticmethod(fake_post)}))
+    monkeypatch.setattr(llm_client.http_client, "request_with_retry", fake_post)
     monkeypatch.setattr(llm_client, "_get_openai_api_key", lambda: "dummy")
 
     with pytest.raises(RuntimeError):

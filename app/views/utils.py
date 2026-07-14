@@ -6,6 +6,13 @@ import streamlit as st
 from app.services.generation_report import GenerationReport
 from app.services.template_validation import ValidationResult
 
+
+def debug_enabled() -> bool:
+    """Outils techniques (debug, mode transport legacy) masqués par défaut à
+    l'utilisateur non-technique. Réactivables en posant MFY_DEBUG=1 dans
+    l'environnement."""
+    return os.getenv("MFY_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
 def _sanitize_filename(name: str, ext: str) -> str:
     base = os.path.basename(name)
     safe = re.sub(r"[^A-Za-z0-9 _\-.]", "_", base)

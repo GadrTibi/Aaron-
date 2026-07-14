@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -10,6 +11,14 @@ from typing import Iterable, Tuple
 
 
 DEFAULT_CACHE_DIR = Path(os.getenv("MFY_TRANSPORT_CACHE_DIR", "out/cache/transports"))
+
+
+def _safe_filename(key: str) -> str:
+    # Hash de la clé -> nom de fichier toujours valide : jamais de caractère illégal
+    # Windows (`:` dans la clé lat:lon:radius:providers provoquait OSError [Errno 22]),
+    # longueur bornée, aucune collision. Aligné sur les caches frères
+    # app/services/geocode_cache.py et services/cache_utils.py (sha1).
+    return hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _normalize_float(value: float, *, rounding: int = 4) -> float:
@@ -27,7 +36,7 @@ def _key(lat: float, lon: float, radius_m: int, provider_order: Iterable[str], *
 def _cache_file(key: str, base_dir: Path | str | None = None) -> Path:
     folder = Path(base_dir) if base_dir is not None else DEFAULT_CACHE_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    return folder / f"{key}.json"
+    return folder / f"{_safe_filename(key)}.json"
 
 
 def _is_expired(ts: float, ttl_seconds: float) -> bool:

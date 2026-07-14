@@ -21,7 +21,7 @@ import requests
 from app.services.generation_report import GenerationReport
 from app.services.overpass_client import query_overpass
 from app.services.provider_status import resolve_api_key
-from services.transports_v3 import GTFSProvider
+from app.services.transports_v3 import GTFSProvider
 
 spec = importlib.util.find_spec("streamlit")  # pragma: no cover - checked without import failure
 if spec is not None:

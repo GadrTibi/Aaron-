@@ -4,9 +4,9 @@ from app.services import llm_client
 def test_payload_uses_structured_outputs_schema(monkeypatch):
     captured = {}
 
-    def fake_post(url, headers, json, timeout):
+    def fake_request(method, url, **kwargs):
         captured["url"] = url
-        captured["payload"] = json
+        captured["payload"] = kwargs.get("json")
 
         class Resp:
             status_code = 200
@@ -16,7 +16,7 @@ def test_payload_uses_structured_outputs_schema(monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr(llm_client, "requests", type("Req", (), {"post": staticmethod(fake_post)}))
+    monkeypatch.setattr(llm_client.http_client, "request_with_retry", fake_request)
     monkeypatch.setattr(llm_client, "_get_openai_api_key", lambda: "dummy")
 
     schema = {"type": "object", "properties": {"foo": {"type": "string"}}}

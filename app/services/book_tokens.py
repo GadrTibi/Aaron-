@@ -85,3 +85,60 @@ def build_book_mapping(ss: dict) -> dict:
         "[[WIFI_PASSWORD]]": ss.get("bk_network_password", ""),
     }
     return mapping
+
+
+def build_book_pdf_sections(mapping: dict) -> tuple[str, str, list[tuple[str, str]]]:
+    """Construit (titre, intro, sections) du PDF d'accueil à partir du mapping Book.
+
+    Alimente ``build_book_pdf`` avec les VRAIES données de session (le bouton PDF
+    passait auparavant des chaînes vides -> PDF blanc). Ne renvoie que les sections
+    réellement renseignées. ``sections`` = liste de paires ``(titre, contenu)``.
+    """
+
+    def val(*keys: str) -> str:
+        for k in keys:
+            v = (mapping.get(k) or "").strip()
+            if v:
+                return v
+        return ""
+
+    adresse = val("[[ADRESSE]]", "[[BOOK_ADRESSE]]")
+    titre = f"Book d'accueil — {adresse}".rstrip(" —") if adresse else "Book d'accueil"
+    intro = "Bienvenue ! Voici les informations utiles pour votre séjour."
+
+    sections: list[tuple[str, str]] = []
+
+    if adresse:
+        sections.append(("Adresse", adresse))
+
+    transports = "\n".join(
+        t for t in (
+            val("[[TRANSPORT_METRO_TEXTE]]"),
+            val("[[TRANSPORT_BUS_TEXTE]]"),
+            val("[[TRANSPORT_TAXI_TEXTE]]", "[[TAXI_TEXTE]]"),
+        ) if t
+    )
+    if transports:
+        sections.append(("Transports", transports))
+
+    acces = "\n".join(
+        a for a in (
+            val("[[BOOK_ACC_PORTE_TEXTE]]", "[[PORTE_ENTREE_TEXTE]]"),
+            val("[[BOOK_ACC_ENTREE_TEXTE]]", "[[ENTREE_TEXTE]]"),
+            val("[[BOOK_ACC_APPART_TEXTE]]", "[[APPARTEMENT_TEXTE]]"),
+        ) if a
+    )
+    if acces:
+        sections.append(("Accès au logement", acces))
+
+    wifi = []
+    net = val("[[WIFI_NETWORK_NAME]]", "[[NETWORK_NAME]]")
+    pwd = val("[[WIFI_PASSWORD]]", "[[NETWORK_PASSWORD]]")
+    if net:
+        wifi.append(f"Réseau : {net}")
+    if pwd:
+        wifi.append(f"Mot de passe : {pwd}")
+    if wifi:
+        sections.append(("Wi-Fi", "\n".join(wifi)))
+
+    return titre, intro, sections

@@ -10,7 +10,7 @@ import streamlit as st
 
 from app.services import template_roots
 from app.services.book_pdf import build_book_pdf
-from app.services.book_tokens import build_book_mapping
+from app.services.book_tokens import build_book_mapping, build_book_pdf_sections
 from app.services.generation_report import GenerationReport
 from app.services.geocoding_fallback import geocode_address_fallback
 from app.services.map_image import build_static_map
@@ -22,6 +22,7 @@ from app.services.template_validation import validate_pptx_template
 
 from .utils import (
     _sanitize_filename,
+    debug_enabled,
     render_generation_report,
     render_template_validation,
 )
@@ -37,16 +38,6 @@ def _format_taxi_summary(items: list[dict]) -> str:
         return name
     mins = int(round(distance / 80.0))
     return f"{name} ({distance} m – {mins} min)"
-
-
-def _format_line_labels(items: list[dict], prefix: str) -> str:
-    labels: list[str] = []
-    for item in items:
-        ref = item.get("ref") or item.get("name")
-        if not ref:
-            continue
-        labels.append(f"{prefix} {ref}" if prefix else str(ref))
-    return ", ".join(labels)
 
 
 def _display_transport_caption(*debug_values: dict | None) -> None:
@@ -192,33 +183,31 @@ def render(config: dict) -> None:
         st.session_state["geo_lon"] = lon
         return lat, lon, provider_used
 
-    if st.button("Remplir transports automatiquement"):
-        lat, lon, _ = _geocode_main_address()
-        if lat is not None:
-            try:
-                radius = st.session_state.get("radius_m", 1200)
-                taxi_items, taxi_debug = fetch_transports(lat, lon, radius_m=radius)
-                metro_items, metro_debug = list_metro_lines(lat, lon, radius_m=radius)
-                bus_items, bus_debug = list_bus_lines(lat, lon, radius_m=radius)
-                st.session_state["q_tx"] = _format_taxi_summary(taxi_items)
-                st.session_state["metro_lines_auto"] = metro_items
-                st.session_state["bus_lines_auto"] = bus_items
-                _display_transport_caption(taxi_debug, metro_debug, bus_debug)
-            except Exception as e:
-                st.warning(f"Transports non chargés: {e}")
-        else:
-            st.session_state["q_tx"] = ""
-            st.session_state["metro_lines_auto"] = []
-            st.session_state["bus_lines_auto"] = []
+    # Transports : repris de l'Estimation (mêmes clés de session) et ÉDITABLES ici.
+    # Le collaborateur peut corriger à la main (invariant : l'auto ne verrouille jamais).
+    st.caption("Transports repris de l'Estimation — modifiables ici.")
+    st.text_area("Métro (lignes)", key="transport_metro_texte", placeholder="Ex: 2, 12")
+    st.text_area("Bus (lignes)", key="transport_bus_texte", placeholder="Ex: 30, 40, 54")
+    st.text_area("Taxi (stations proches)", key="transport_taxi_texte", placeholder="Stations de taxi")
+    st.caption("ℹ️ Le taxi n'apparaît que dans le PDF : le modèle Book PPTX n'a pas de zone taxi.")
 
-    taxi_txt = st.session_state.get("q_tx", "")
-    metro_auto = st.session_state.get("metro_lines_auto") or []
-    bus_auto = st.session_state.get("bus_lines_auto") or []
-    metro_refs = _format_line_labels(metro_auto, "")
-    bus_refs = _format_line_labels(bus_auto, "")
-    st.write(f"Taxi : {taxi_txt or '—'}")
-    st.write(f"Stations proches : {metro_refs or '—'}")
-    st.write(f"Arrêts de bus proches : {bus_refs or '—'}")
+    # Ancienne récupération automatique (Overpass/GTFS) : rétrogradée, masquée à
+    # l'utilisateur. Réactivable via MFY_DEBUG=1.
+    if debug_enabled():
+        if st.button("Remplir transports automatiquement (legacy)"):
+            lat, lon, _ = _geocode_main_address()
+            if lat is not None:
+                try:
+                    radius = st.session_state.get("radius_m", 1200)
+                    taxi_items, taxi_debug = fetch_transports(lat, lon, radius_m=radius)
+                    metro_items, metro_debug = list_metro_lines(lat, lon, radius_m=radius)
+                    bus_items, bus_debug = list_bus_lines(lat, lon, radius_m=radius)
+                    st.session_state["q_tx"] = _format_taxi_summary(taxi_items)
+                    st.session_state["metro_lines_auto"] = metro_items
+                    st.session_state["bus_lines_auto"] = bus_items
+                    _display_transport_caption(taxi_debug, metro_debug, bus_debug)
+                except Exception as e:
+                    st.warning(f"Transports non chargés: {e}")
 
     # ---- Instructions (Slide 5) ----
     st.subheader("Instructions (Slide 5)")
@@ -326,13 +315,14 @@ def render(config: dict) -> None:
     with col2:
         if st.button("Générer le Book (PDF simplifié)"):
             pdf_out = os.path.join(OUT_DIR, f"Book - {st.session_state.get('bien_addr', 'bien')}.pdf")
-            sections: list[str] = []
-            build_book_pdf(
-                pdf_out,
-                "",
-                "",
-                sections,
-            )
-            st.success(f"OK: {pdf_out}")
-            with open(pdf_out, "rb") as f:
-                st.download_button("Télécharger le PDF", data=f.read(), file_name=os.path.basename(pdf_out))
+            titre, intro, sections = build_book_pdf_sections(mapping)
+            if not sections:
+                st.warning(
+                    "Aucune donnée à mettre dans le PDF (adresse, transports, accès, Wi-Fi tous vides). "
+                    "Renseignez au moins un champ avant de générer."
+                )
+            else:
+                build_book_pdf(pdf_out, titre, intro, sections)
+                st.success(f"OK: {pdf_out}")
+                with open(pdf_out, "rb") as f:
+                    st.download_button("Télécharger le PDF", data=f.read(), file_name=os.path.basename(pdf_out))

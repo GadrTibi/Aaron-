@@ -6,8 +6,8 @@ from typing import Dict, List
 import pytest
 
 from config import wiki_settings
-from services.wiki_images import ImageCandidate, WikiImageService
-from services.wiki_poi import WikiPOIService
+from app.services.wiki_images import ImageCandidate, WikiImageService
+from app.services.wiki_poi import WikiPOIService
 
 
 @pytest.fixture(autouse=True)

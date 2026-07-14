@@ -5,7 +5,16 @@ from docx import Document
 from pptx import Presentation
 
 
-DOCX_TOKEN_PATTERN = re.compile(r"«[^»]+»")
+# Un token Word MFY est un PLACEHOLDER de fusion entre guillemets français. On code
+# l'INTENTION, pas une forme figée (règle « conformité = intention, pas liste de
+# tournures ») : les termes juridiques du corps du mandat sont écrits avec des
+# guillemets TYPOGRAPHIQUES, donc un espace (normal ou insécable) COLLÉ au guillemet
+# — « Mandant », « Bien », « Mandataire », « Notice d'Information… ». Un placeholder,
+# lui, ne colle jamais d'espace au guillemet. Le motif exige donc un premier ET un
+# dernier caractère NON-espace : il exclut les termes juridiques tout en détectant
+# un placeholder même à espaces internes (ex. « Nom du gérant ») — contrairement à
+# «\w+» qui rendrait un tel token INVISIBLE au garde-fou « document incomplet ».
+DOCX_TOKEN_PATTERN = re.compile(r"«\S(?:[^»]*\S)?»")
 PPTX_TOKEN_PATTERN = re.compile(r"\[\[[^\]]+\]\]")
 
 

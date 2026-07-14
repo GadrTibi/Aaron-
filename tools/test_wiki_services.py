@@ -5,8 +5,8 @@ import argparse
 import pprint
 from typing import List
 
-from services.wiki_images import WikiImageService
-from services.wiki_poi import POI, WikiPOIService
+from app.services.wiki_images import WikiImageService
+from app.services.wiki_poi import POI, WikiPOIService
 
 
 def _format_poi(poi: POI) -> str:

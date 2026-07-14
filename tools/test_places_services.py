@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from services.places_geoapify import GeoapifyPlacesService
-from services.places_otm import OpenTripMapService
+from app.services.places_geoapify import GeoapifyPlacesService
+from app.services.places_otm import OpenTripMapService
 
 
 def _print_preview(title: str, count: int, items: list[object]) -> None:

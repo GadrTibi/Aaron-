@@ -1,3 +1,7 @@
+> ⚠️ **Registre généré en 2025-12 — partiellement obsolète.** Voir [`refonte/00-CDC-REFERENCE.md`](refonte/00-CDC-REFERENCE.md).
+> R4 (purge des caches images) cite `image_fetcher.py:15-69` **qui n'existe plus** (chaîne d'images supprimée au Lot A 2026-07) :
+> la référence est caduque ; le risque de saturation disque des images téléchargées automatiquement ne s'applique plus.
+
 | ID | Catégorie | Risque | Où dans le code | Symptôme côté user | Cause racine probable | Gravité | Correctif recommandé | Test de non-régression proposé |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | R1 | Fiabilité | Absence de clés API désactive la recherche de lieux (Google Places) et réduit l’automatisme transports | `app/views/estimation.py` lignes 107-151 ; `services/transports_v3.py` lignes 158-214 | Listes POI vides, messages “Clé Google manquante”, générateurs de documents incomplets | Clé `GOOGLE_MAPS_API_KEY` non fournie ou invalide | P1 | Ajouter une alerte bloquante avant génération si aucune clé n’est disponible et fournir un fallback OSM/Geoapify activé par défaut | Test Streamlit e2e simulant absence de clé et vérifiant que le bouton de génération refuse avec un message clair |

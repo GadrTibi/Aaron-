@@ -1,3 +1,10 @@
+> ⚠️ **Document généré en 2025-12 — PARTIELLEMENT OBSOLÈTE depuis la refonte 2026-07.**
+> Source de vérité à jour : [`refonte/00-CDC-REFERENCE.md`](refonte/00-CDC-REFERENCE.md) et
+> [`product/PRODUCT.md`](product/PRODUCT.md). En particulier : (a) la **chaîne d'images automatiques**
+> (`image_fetcher.py`, `http_fetch.py`, Unsplash/Pexels, `logs/images_debug.log`) a été **supprimée**
+> (images via Wikimedia + upload manuel) ; (b) les deux couches de services ont été **unifiées** —
+> tout `services/…py` cité ici vit désormais sous **`app/services/…py`** (plus de dossier `services/` racine).
+
 ## Résumé du produit
 Outil Streamlit local permettant de générer trois livrables immobiliers : un PPTX d’estimation, un DOCX de mandat et un Book PPTX/PDF pour les locataires. L’app regroupe la saisie des données générales (propriétaire, bien), la découverte automatique du quartier (POI, transports, images), le calcul des revenus et l’injection des contenus dans des modèles Office en conservant la mise en forme. Les dépendances clés sont `streamlit`, `python-pptx`, `python-docx`, `requests`, `matplotlib` et `Pillow`. 【app/main.py†L1-L87】【app/views/estimation.py†L1-L88】
 

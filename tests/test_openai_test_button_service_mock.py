@@ -10,7 +10,7 @@ def test_openai_test_button_service_mock_success(monkeypatch):
 
         text = ""
 
-    monkeypatch.setattr(llm_client, "requests", type("Req", (), {"get": staticmethod(lambda *a, **k: Resp())}))
+    monkeypatch.setattr(llm_client.http_client, "request_with_retry", lambda *a, **k: Resp())
 
     ok, message = llm_client.test_openai_api_key("sk-test")
 
@@ -27,7 +27,7 @@ def test_openai_test_button_service_mock_error(monkeypatch):
 
         text = "Invalid API key"
 
-    monkeypatch.setattr(llm_client, "requests", type("Req", (), {"get": staticmethod(lambda *a, **k: Resp())}))
+    monkeypatch.setattr(llm_client.http_client, "request_with_retry", lambda *a, **k: Resp())
 
     ok, message = llm_client.test_openai_api_key("sk-secret-value")
 

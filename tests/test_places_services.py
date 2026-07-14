@@ -7,8 +7,8 @@ import pytest
 import requests
 
 from config import places_settings
-from services.places_geoapify import GeoapifyPlacesService
-from services.places_otm import OpenTripMapService
+from app.services.places_geoapify import GeoapifyPlacesService
+from app.services.places_otm import OpenTripMapService
 
 
 class FakeResponse:

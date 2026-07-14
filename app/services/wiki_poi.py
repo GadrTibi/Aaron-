@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 import requests
 
 from config import wiki_settings
-from services.cache_utils import read_cache_json, write_cache_json
+from app.services.cache_utils import read_cache_json, write_cache_json
 
 logger = logging.getLogger(__name__)
 

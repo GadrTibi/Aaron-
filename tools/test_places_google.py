@@ -14,7 +14,7 @@ def _ensure_repo_root() -> None:
 _ensure_repo_root()
 
 from app.views.settings_keys import read_local_secret  # noqa: E402
-from services.places_google import GooglePlacesService  # noqa: E402
+from app.services.places_google import GooglePlacesService  # noqa: E402
 
 
 def _format_place(name: str, distance_m: float) -> str:
