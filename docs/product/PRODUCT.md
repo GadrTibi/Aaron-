@@ -29,8 +29,13 @@ Collaborateur MFY **non-développeur** → l'interface doit être simple, guidé
 5. **GenerationReport** + validation de template conservés (mode strict).
 6. Les **templates Office = source de vérité visuelle** (l'app ne reconstruit jamais le design).
 
-## Refonte en cours (2026-07)
-Branche `refonte-propre`. Approche : **consolider l'existant** (le cœur métier est sain et testé),
-supprimer le désordre, fiabiliser (calculs, tokens, POI), refondre l'UX (onglet clés API), finir le Book.
-Plan : [`../refonte/01-PLAN-REFONTE.md`](../refonte/01-PLAN-REFONTE.md).
-`main` = branche de déploiement Streamlit Cloud → **merge = décision PM**.
+## Refonte 2026-07 — livrée sur `main`
+Deux sprints menés sur `refonte-propre` puis **mergés sur `main`** (GO PM 2026-07-14) :
+- Sprint 1 : nettoyage code mort, correction du **crash de démarrage**, calculs CD/MD fiabilisés,
+  faux « document incomplet » du mandat corrigé, refonte de l'onglet Clés API, PDF Book alimenté.
+- Sprint 2 : unification des couches services, couche HTTP commune + retry, masquage du debug/legacy
+  derrière `MFY_DEBUG`, transports du Book éditables.
+150 tests verts ; tous les lots gatés (revue adversariale). Détail : [`../refonte/01-PLAN-REFONTE.md`](../refonte/01-PLAN-REFONTE.md).
+`main` = branche de déploiement Streamlit Cloud.
+
+**Points ouverts restants** (à confirmer avec MFY) : [`../refonte/02-points-ouverts-client.md`](../refonte/02-points-ouverts-client.md) — dont P3 (arrondi MD 491/492 €).
